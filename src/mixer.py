@@ -15,8 +15,6 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol
 
-import levels
-
 # A read-only empty mapping, safe to share as a default.
 EMPTY: Mapping[str, Any] = MappingProxyType({})
 
@@ -54,6 +52,30 @@ class Rejected(MixerError):
 
 
 # ---------------------------------------------------------------------------
+# Levels
+# ---------------------------------------------------------------------------
+
+# The MOTU's level resolution: it stores anything below 5e-7 as 0.
+LEVEL_DECIMALS = 6
+
+
+def gain_to_db(gain: int | float) -> float:
+    """Linear gain to dB. 0 returns -inf."""
+    gain = float(gain)
+    if gain == 0:
+        return -math.inf
+    return 20 * math.log10(gain)
+
+
+def db_to_gain(db: int | float) -> float:
+    """dB to linear gain. -inf returns 0, beyond the float range inf."""
+    try:
+        return 10 ** (float(db) / 20)
+    except OverflowError:
+        return math.inf
+
+
+# ---------------------------------------------------------------------------
 # Codecs
 # ---------------------------------------------------------------------------
 
@@ -66,11 +88,6 @@ def _number(value: object) -> float:
     ):
         raise InvalidValue("'value' must be a finite number")
     return float(value)
-
-
-def _json_number(value: float) -> float | None:
-    """Rounded to 10 decimals; JSON has no infinity or NaN, so -inf becomes null."""
-    return round(value, 10) if math.isfinite(value) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,15 +136,15 @@ class LinearScale:
 
 @dataclass(frozen=True, slots=True)
 class DecibelScale:
-    """The number is in dB; None (JSON null) is silence."""
+    """The number is in dB; -inf is silence."""
 
     def to_gain(self, number: object) -> float:
-        """dB -> gain; None is silence."""
-        return 0.0 if number is None else levels.db_to_gain(_number(number))
+        """dB -> gain; -inf is silence."""
+        return 0.0 if number == -math.inf else db_to_gain(_number(number))
 
     def from_gain(self, gain: float) -> float:
         """Gain -> dB; silence is -inf."""
-        return levels.gain_to_db(gain)
+        return gain_to_db(gain)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,11 +155,11 @@ class TaperedScale:
 
     def to_gain(self, number: object) -> float:
         """Taper position -> gain, via dB."""
-        return levels.db_to_gain(self.taper.to_db(_number(number)))
+        return db_to_gain(self.taper.to_db(_number(number)))
 
     def from_gain(self, gain: float) -> float:
         """Gain -> taper position, via dB."""
-        return self.taper.from_db(levels.gain_to_db(gain))
+        return self.taper.from_db(gain_to_db(gain))
 
 
 LINEAR = LinearScale()
@@ -176,7 +193,7 @@ class NumberCodec:
     unit: str | None = None
 
     def decode(self, stored: Any, scale: str | None) -> Reading:
-        return Reading(_json_number(float(stored)), {"unit": self.unit})
+        return Reading(float(stored), {"unit": self.unit})
 
     def encode(self, value: object, scale: str | None) -> float:
         number = _number(value)
@@ -214,15 +231,11 @@ class LevelCodec:
     scales: Mapping[str, LevelScale] = field(default_factory=lambda: LEVEL_SCALES)
 
     def decode(self, stored: Any, scale: str | None) -> Reading:
-        number = self.scales[scale].from_gain(float(stored))
-        return Reading(_json_number(number), {"scale": scale})
+        return Reading(self.scales[scale].from_gain(float(stored)), {"scale": scale})
 
     def encode(self, value: object, scale: str | None) -> float:
         gain = self.scales[scale].to_gain(value)
-        return round(
-            levels.limit_to_range(gain, self.minimum, self.maximum),
-            levels.LEVEL_DECIMALS,
-        )
+        return round(min(max(gain, self.minimum), self.maximum), LEVEL_DECIMALS)
 
 
 def parse_spec(spec: str, scales: Mapping[str, LevelScale] = LEVEL_SCALES) -> Codec:
@@ -256,6 +269,18 @@ CTRL_RULES = (
 )
 
 
+class Store(Protocol):
+    """The datastore operations Controls and MixerService need (motu.DataStore)."""
+
+    data: dict
+
+    def get(self, path: str) -> Any | None: ...
+
+    async def set(self, path: str, value: Any) -> Any | None: ...
+
+    async def toggle(self, path: str) -> float | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class Control:
     path: str
@@ -266,7 +291,7 @@ class Controls:
     """Datastore path -> Control, using the specs found in the datastore."""
 
     def __init__(
-        self, store: Store, scales: Mapping[str, LevelScale] | None = None
+        self, store: Store, *, scales: Mapping[str, LevelScale] | None = None
     ) -> None:
         """scales: extra level scales by name, besides linear and db."""
         self._store = store
@@ -304,18 +329,6 @@ class Controls:
 # ---------------------------------------------------------------------------
 
 
-class Store(Protocol):
-    """The datastore operations MixerService needs (motu.DataStore)."""
-
-    data: dict
-
-    def get(self, path: str) -> Any | None: ...
-
-    async def set(self, path: str, value: Any) -> Any | None: ...
-
-    async def toggle(self, path: str) -> float | None: ...
-
-
 class MixerService:
     """Reads and writes mixer values with validation and level scale conversion."""
 
@@ -324,7 +337,7 @@ class MixerService:
     ) -> None:
         """scales: extra level scales by name, besides linear and db."""
         self._store = store
-        self._controls = Controls(store, scales)
+        self._controls = Controls(store, scales=scales)
 
     def _control(self, path: str) -> Control:
         if not self._store.data:

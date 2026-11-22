@@ -1,4 +1,5 @@
 import logging
+import math
 
 from aioprometheus import MetricsMiddleware
 from aioprometheus.asgi.quart import metrics
@@ -160,8 +161,25 @@ async def handle_mixer_error(error: mixer.MixerError) -> tuple[dict, int]:
     return {"error": str(error)}, ERROR_STATUS.get(type(error), 500)
 
 
+def _from_json(value: object) -> object:
+    """JSON has no infinity: null is silence (-inf dB).
+
+    Infinity and NaN, which the JSON parser also accepts, are not valid JSON.
+    """
+    if value is None:
+        return -math.inf
+    if isinstance(value, float) and not math.isfinite(value):
+        raise BadRequest("'value' must be a finite number")
+    return value
+
+
+def _to_json(value: object) -> object:
+    """JSON has no infinity: silence (-inf dB) is null."""
+    return None if isinstance(value, float) and not math.isfinite(value) else value
+
+
 def _response(reading: mixer.Reading) -> dict:
-    return {"value": reading.value, **reading.meta}
+    return {"value": _to_json(reading.value), **reading.meta}
 
 
 async def _body() -> dict:
@@ -188,7 +206,10 @@ async def mix_put(path: str) -> dict:
     body = await _body()
     return _response(
         await mixer_service.write(
-            f"mix/{path}", body["value"], body.get("scale"), request.args.get("scale")
+            f"mix/{path}",
+            _from_json(body["value"]),
+            body.get("scale"),
+            request.args.get("scale"),
         )
     )
 

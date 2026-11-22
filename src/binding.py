@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import raw_panel
 
-import levels
+import mixer
 import motu
 
 logger = logging.getLogger(__name__)
@@ -84,8 +84,8 @@ def _lerp(value: float, segments: tuple) -> float:
     return first_dst
 
 
-class RangeMap:
-    """A DbTaper built from a range table."""
+class PiecewiseTaper:
+    """A DbTaper interpolated linearly between the points and ranges of a table."""
 
     def __init__(self, mapping: tuple) -> None:
         self._to_db = _segments(mapping)
@@ -98,8 +98,8 @@ class RangeMap:
         return int(_lerp(float(db), self._from_db))
 
 
-FADER_TAPER = RangeMap(FADERS_RANGE_MAPPING)
-METER_TAPER = RangeMap(METERS_RANGE_MAPPING)
+FADER_TAPER = PiecewiseTaper(FADERS_RANGE_MAPPING)
+METER_TAPER = PiecewiseTaper(METERS_RANGE_MAPPING)
 
 
 def role_from_path(path: str) -> str:
@@ -233,7 +233,7 @@ class FeedbackMap(_Map):
 class MotuController:
     """Panel HWC → Motu datastore."""
 
-    def __init__(self, control_map: ControlMap, *, fader_taper: RangeMap) -> None:
+    def __init__(self, control_map: ControlMap, *, fader_taper: PiecewiseTaper) -> None:
         self._map = control_map
         self._fader_taper = fader_taper
         self._ds = None
@@ -303,12 +303,12 @@ class MotuController:
                 return 1.0
             # Rounded like the MOTU stores it, so it compares equal after a poll.
             default = round(
-                levels.db_to_gain(min(cfg.default_level_db, MAX_DB)),
-                levels.LEVEL_DECIMALS,
+                mixer.db_to_gain(min(cfg.default_level_db, MAX_DB)),
+                mixer.LEVEL_DECIMALS,
             )
             return default if current != default else 1.0
         db = self._fader_taper.to_db(raw)
-        return levels.db_to_gain(db)
+        return mixer.db_to_gain(db)
 
     async def _handle_send(self, cfg: BindingConfig, v: str, hwcid: str | int) -> None:
         level = self._level_from_panel_value(cfg, v)
@@ -361,8 +361,8 @@ class PanelController:
         self,
         feedback_map: FeedbackMap,
         *,
-        fader_taper: RangeMap,
-        meter_taper: RangeMap,
+        fader_taper: PiecewiseTaper,
+        meter_taper: PiecewiseTaper,
     ) -> None:
         self._map = feedback_map
         self._fader_taper = fader_taper
@@ -555,7 +555,7 @@ class PanelController:
             if tail in ("mute", "fader", "send"):
                 self._update_meter_multiplier_for_path(path)
                 if tail in ("send", "fader"):
-                    db_value = levels.gain_to_db(value)
+                    db_value = mixer.gain_to_db(value)
                     raw_value = self._fader_taper.from_db(db_value)
             for target in mapping:
                 handler = self._kind_handlers.get(target.kind)
@@ -607,7 +607,7 @@ class PanelController:
     def _meter_level_to_raw(self, value: int, *, multiplier: float = 1.0) -> int:
         """Meter sample (0 to METER_SCALE) → panel raw."""
         gain = value * multiplier / motu.METER_SCALE
-        db = levels.gain_to_db(gain)
+        db = mixer.gain_to_db(gain)
         return self._meter_taper.from_db(db)
 
     @staticmethod

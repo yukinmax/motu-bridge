@@ -11,7 +11,7 @@ It is an asyncio service built on [Quart](https://quart.palletsprojects.com/), s
 ## Features
 
 - Two-way sync between the panel and the MOTU mixer: panel input is written to the MOTU datastore, and MOTU changes are pushed to the panel
-- Faders control aux send levels through a piecewise raw-to-dB mapping that spends most of the fader travel on the -30 dB to +12 dB range
+- Faders control aux send levels through a fader taper that spends most of the fader travel on the -30 dB to +12 dB range
 - Mute and solo buttons with lit feedback, plus a monitor override button
 - Per-button default send level: pressing the button toggles a send between its default level and unity
 - Displays showing the current level in dB
@@ -61,7 +61,6 @@ The application is wired together in `src/api.py`. At startup it opens the share
 └── src/
     ├── api.py                Quart app, REST API, /metrics, startup and shutdown wiring
     ├── mixer.py              MOTU mixer controls, value validation and level scale conversion
-    ├── levels.py             Linear gain and dB conversions
     ├── binding.py            Controllers, control and feedback maps, raw/dB conversion
     ├── mappings.py           HWC to MOTU path control table and MOTU path to panel feedback table
     ├── motu.py               Async HTTP client, MOTU datastore and meters long-polling
@@ -217,7 +216,7 @@ The mixer API mirrors the MOTU datastore: the URL path after `/api/v1/motu/mix/`
 | --- | --- | --- | --- |
 | `GET` | `/` | | Landing page (HTML) |
 | `GET` | `/api/v1/motu/mix/<path>?scale=<scale>` | | `{"value": 0.5, "scale": "linear"}` |
-| `PUT` | `/api/v1/motu/mix/<path>?scale=<scale>` | `{"value": -6, "scale": "db"}` | `{"value": -6.0, "scale": "db"}` with the value that was applied |
+| `PUT` | `/api/v1/motu/mix/<path>?scale=<scale>` | `{"value": -20, "scale": "db"}` | `{"value": -20.0, "scale": "db"}` with the value that was applied |
 | `POST` | `/api/v1/motu/mix/<path>` | none | `{"value": true}` with the new state after toggling |
 
 Each control is validated against the specification the MOTU publishes for it under `mix/ctrls`:
