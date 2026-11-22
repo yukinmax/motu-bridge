@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol
 
@@ -78,7 +78,7 @@ class Reading:
     """A decoded value, with its scale (levels) or unit (numbers)."""
 
     value: Any
-    meta: Mapping[str, Any] = EMPTY
+    meta: Mapping[str, Any] = field(default_factory=lambda: EMPTY)
 
 
 class LevelScale(Protocol):
@@ -211,7 +211,7 @@ class LevelCodec:
 
     minimum: float
     maximum: float
-    scales: Mapping[str, LevelScale] = LEVEL_SCALES
+    scales: Mapping[str, LevelScale] = field(default_factory=lambda: LEVEL_SCALES)
 
     def decode(self, stored: Any, scale: str | None) -> Reading:
         number = self.scales[scale].from_gain(float(stored))
