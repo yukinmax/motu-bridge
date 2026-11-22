@@ -2,7 +2,8 @@
 
 Every value under mix/ in the datastore resolves to a Control. Its codec,
 built from the matching mix/ctrls spec, validates and converts values between
-the API and the datastore. Values without a spec are read-only.
+clients (the REST API and the panel) and the datastore. Values without a spec
+are read-only.
 """
 
 from __future__ import annotations
@@ -11,9 +12,11 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Protocol
+from types import MappingProxyType
+from typing import Any, Protocol
 
-import levels
+# A read-only empty mapping, safe to share as a default.
+EMPTY: Mapping[str, Any] = MappingProxyType({})
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -49,6 +52,30 @@ class Rejected(MixerError):
 
 
 # ---------------------------------------------------------------------------
+# Levels
+# ---------------------------------------------------------------------------
+
+# The MOTU's level resolution: it stores anything below 5e-7 as 0.
+LEVEL_DECIMALS = 6
+
+
+def gain_to_db(gain: int | float) -> float:
+    """Linear gain to dB. 0 returns -inf."""
+    gain = float(gain)
+    if gain == 0:
+        return -math.inf
+    return 20 * math.log10(gain)
+
+
+def db_to_gain(db: int | float) -> float:
+    """dB to linear gain. -inf returns 0, beyond the float range inf."""
+    try:
+        return 10 ** (float(db) / 20)
+    except OverflowError:
+        return math.inf
+
+
+# ---------------------------------------------------------------------------
 # Codecs
 # ---------------------------------------------------------------------------
 
@@ -63,32 +90,97 @@ def _number(value: object) -> float:
     return float(value)
 
 
-def _json_number(value: float) -> float | None:
-    """JSON has no infinity or NaN, so -inf (silence in dB) becomes null."""
-    return round(value, 10) if math.isfinite(value) else None
+@dataclass(frozen=True, slots=True)
+class Reading:
+    """A decoded value, with its scale (levels) or unit (numbers)."""
+
+    value: Any
+    meta: Mapping[str, Any] = field(default_factory=lambda: EMPTY)
+
+
+class LevelScale(Protocol):
+    """A way to write a level as a number.
+
+    Converts between that number and the MOTU's linear gain.
+    """
+
+    def to_gain(self, number: object) -> float:
+        """Number -> gain; raises InvalidValue for an invalid number."""
+        ...
+
+    def from_gain(self, gain: float) -> float:
+        """Gain -> number; -inf for silence where the scale has no zero."""
+        ...
+
+
+class DbTaper(Protocol):
+    """Maps positions on a taper, such as the panel's fader or meter, to dB and back."""
+
+    def to_db(self, position: float) -> float: ...
+
+    def from_db(self, db: float) -> float: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LinearScale:
+    """The number is the linear gain, the MOTU's native value."""
+
+    def to_gain(self, number: object) -> float:
+        """Finite number -> gain; None is rejected."""
+        return _number(number)
+
+    def from_gain(self, gain: float) -> float:
+        """Gain -> the same number."""
+        return gain
+
+
+@dataclass(frozen=True, slots=True)
+class DecibelScale:
+    """The number is in dB; -inf is silence."""
+
+    def to_gain(self, number: object) -> float:
+        """dB -> gain; -inf is silence."""
+        return db_to_gain(number if number == -math.inf else _number(number))
+
+    def from_gain(self, gain: float) -> float:
+        """Gain -> dB; silence is -inf."""
+        return gain_to_db(gain)
+
+
+@dataclass(frozen=True, slots=True)
+class TaperedScale:
+    """The number is a position on a DbTaper, such as the panel's fader."""
+
+    taper: DbTaper
+
+    def to_gain(self, number: object) -> float:
+        """Taper position -> gain, via dB."""
+        return db_to_gain(self.taper.to_db(_number(number)))
+
+    def from_gain(self, gain: float) -> float:
+        """Gain -> taper position, via dB."""
+        return self.taper.from_db(gain_to_db(gain))
+
+
+LINEAR = LinearScale()
+DB = DecibelScale()
+# Built-in level scales, read-only as all level codecs share them; the first is
+# the default.
+LEVEL_SCALES: Mapping[str, LevelScale] = MappingProxyType({"linear": LINEAR, "db": DB})
 
 
 class Codec(Protocol):
-    @property
-    def formats(self) -> tuple[str, ...]: ...
+    def decode(self, stored: Any, scale: str | None) -> Reading: ...
 
-    @property
-    def toggleable(self) -> bool: ...
-
-    def decode(self, stored: Any, fmt: str | None) -> Any: ...
-
-    def encode(self, value: object, fmt: str | None) -> float: ...
+    def encode(self, value: object, scale: str | None) -> float: ...
 
 
 @dataclass(frozen=True, slots=True)
 class BoolCodec:
-    formats: ClassVar[tuple[str, ...]] = ()
-    toggleable: ClassVar[bool] = True
+    def decode(self, stored: Any, scale: str | None) -> Reading:
+        return Reading(bool(stored))
 
-    def decode(self, stored: Any, fmt: str | None) -> bool:
-        return bool(stored)
-
-    def encode(self, value: object, fmt: str | None) -> float:
+    def encode(self, value: object, scale: str | None) -> float:
         if not isinstance(value, bool):
             raise InvalidValue("'value' must be true or false")
         return float(value)
@@ -99,13 +191,11 @@ class NumberCodec:
     minimum: float
     maximum: float
     unit: str | None = None
-    formats: ClassVar[tuple[str, ...]] = ()
-    toggleable: ClassVar[bool] = False
 
-    def decode(self, stored: Any, fmt: str | None) -> float | None:
-        return _json_number(float(stored))
+    def decode(self, stored: Any, scale: str | None) -> Reading:
+        return Reading(float(stored), {"unit": self.unit})
 
-    def encode(self, value: object, fmt: str | None) -> float:
+    def encode(self, value: object, scale: str | None) -> float:
         number = _number(value)
         if not self.minimum <= number <= self.maximum:
             raise InvalidValue(
@@ -117,70 +207,39 @@ class NumberCodec:
 @dataclass(frozen=True, slots=True)
 class EnumCodec:
     options: Mapping[int, str]
-    formats: ClassVar[tuple[str, ...]] = ()
-    toggleable: ClassVar[bool] = False
 
-    def decode(self, stored: Any, fmt: str | None) -> int:
-        return int(stored)
+    def decode(self, stored: Any, scale: str | None) -> Reading:
+        return Reading(int(stored))
 
-    def encode(self, value: object, fmt: str | None) -> float:
+    def encode(self, value: object, scale: str | None) -> float:
         if isinstance(value, bool) or value not in self.options:
             choices = ", ".join(f"{k} ({v})" for k, v in self.options.items())
             raise InvalidValue(f"'value' must be one of: {choices}")
         return float(value)
 
 
-class Scale(Protocol):
-    """A level scale other than linear gain, such as a panel's fader scale."""
-
-    def to_db(self, value: float) -> float: ...
-
-    def from_db(self, db: float) -> float: ...
-
-
 @dataclass(frozen=True, slots=True)
 class LevelCodec:
-    """Linear gain, also readable and writable in dB and any extra scales."""
+    """Linear gain within [minimum, maximum], written on any of its scales.
+
+    Written gains are limited to the range and rounded to the MOTU's
+    resolution.
+    """
 
     minimum: float
     maximum: float
-    scales: Mapping[str, Scale] = field(default_factory=dict)
-    toggleable: ClassVar[bool] = False
+    scales: Mapping[str, LevelScale] = field(default_factory=lambda: LEVEL_SCALES)
 
-    @property
-    def formats(self) -> tuple[str, ...]:
-        return ("linear", "db", *self.scales)
+    def decode(self, stored: Any, scale: str | None) -> Reading:
+        return Reading(self.scales[scale].from_gain(float(stored)), {"scale": scale})
 
-    def decode(self, stored: Any, fmt: str | None) -> float | None:
-        level = float(stored)
-        if fmt == "linear":
-            return _json_number(level)
-        db = levels.level_to_db(level)
-        if fmt == "db":
-            return _json_number(db)
-        return _json_number(self.scales[fmt].from_db(db))
-
-    def encode(self, value: object, fmt: str | None) -> float:
-        if fmt == "linear":
-            level = levels.limit_to_range(_number(value), self.minimum, self.maximum)
-        elif fmt == "db" and value is None:
-            level = self.minimum  # null is silence, as in responses
-        else:
-            db = _number(value)
-            if fmt != "db":
-                db = self.scales[fmt].to_db(db)
-            level = levels.db_to_level(
-                levels.limit_to_range(
-                    db,
-                    levels.level_to_db(self.minimum),
-                    levels.level_to_db(self.maximum),
-                )
-            )
-        return round(level, levels.LEVEL_DECIMALS)
+    def encode(self, value: object, scale: str | None) -> float:
+        gain = self.scales[scale].to_gain(value)
+        return round(min(max(gain, self.minimum), self.maximum), LEVEL_DECIMALS)
 
 
-def parse_spec(spec: str, scales: Mapping[str, Scale] | None = None) -> Codec:
-    """Codec for a mix/ctrls spec, with any extra level scales.
+def parse_spec(spec: str, scales: Mapping[str, LevelScale] = LEVEL_SCALES) -> Codec:
+    """Codec for a mix/ctrls spec, with the scales levels can use.
 
     Specs look like 'bool:0', 'enum:0:0=RMS:1=Peak', 'real:2:1:10',
     'int:100:20:20000:Hz' and 'real:0:0:4:linear' (default first).
@@ -192,7 +251,7 @@ def parse_spec(spec: str, scales: Mapping[str, Scale] | None = None) -> Codec:
         return EnumCodec({int(k): v for k, v in (o.split("=", 1) for o in rest)})
     minimum, maximum, *unit = rest
     if unit == ["linear"]:
-        return LevelCodec(float(minimum), float(maximum), scales or {})
+        return LevelCodec(float(minimum), float(maximum), scales)
     return NumberCodec(float(minimum), float(maximum), unit[0] if unit else None)
 
 
@@ -210,6 +269,18 @@ CTRL_RULES = (
 )
 
 
+class Store(Protocol):
+    """The datastore operations Controls and MixerService need (motu.DataStore)."""
+
+    data: dict
+
+    def get(self, path: str) -> Any | None: ...
+
+    async def set(self, path: str, value: Any) -> Any | None: ...
+
+    async def toggle(self, path: str) -> float | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class Control:
     path: str
@@ -219,9 +290,12 @@ class Control:
 class Controls:
     """Datastore path -> Control, using the specs found in the datastore."""
 
-    def __init__(self, store: Store, scales: Mapping[str, Scale] | None = None) -> None:
+    def __init__(
+        self, store: Store, *, scales: Mapping[str, LevelScale] | None = None
+    ) -> None:
+        """scales: extra level scales by name, besides linear and db."""
         self._store = store
-        self._scales = dict(scales or {})
+        self._scales = MappingProxyType({**LEVEL_SCALES, **(scales or {})})
         self._codecs: dict[str, Codec | None] = {}
 
     def _ctrl_key(self, path: str) -> str | None:
@@ -255,33 +329,15 @@ class Controls:
 # ---------------------------------------------------------------------------
 
 
-class Store(Protocol):
-    """The datastore operations MixerService needs (motu.DataStore)."""
-
-    data: dict
-
-    def get(self, path: str) -> Any | None: ...
-
-    async def set(self, path: str, value: Any) -> Any | None: ...
-
-    async def toggle(self, path: str) -> float | None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class Reading:
-    value: Any
-    format: str | None = None
-
-
 class MixerService:
-    """Reads and writes mixer values with validation and unit conversion."""
+    """Reads and writes mixer values with validation and level scale conversion."""
 
     def __init__(
-        self, store: Store, *, scales: Mapping[str, Scale] | None = None
+        self, store: Store, *, scales: Mapping[str, LevelScale] | None = None
     ) -> None:
-        """scales: extra level formats by name, besides linear and db."""
+        """scales: extra level scales by name, besides linear and db."""
         self._store = store
-        self._controls = Controls(store, scales)
+        self._controls = Controls(store, scales=scales)
 
     def _control(self, path: str) -> Control:
         if not self._store.data:
@@ -298,49 +354,50 @@ class MixerService:
         return control.codec
 
     @staticmethod
-    def _format(control: Control, fmt: str | None) -> str | None:
-        formats = control.codec.formats if control.codec else ()
-        if not formats:
-            if fmt is not None:
-                raise InvalidValue(f"{control.path} has no 'format' option")
+    def _scale(control: Control, scale: str | None) -> str | None:
+        """The scale to use for control: the given one, else the default."""
+        codec = control.codec
+        if not isinstance(codec, LevelCodec):
+            if scale is not None:
+                raise InvalidValue(f"{control.path} has no 'scale' option")
             return None
-        if fmt is None:
-            return formats[0]
-        if fmt not in formats:
-            raise InvalidValue(f"'format' must be one of: {', '.join(formats)}")
-        return fmt
+        if scale is None:
+            return next(iter(codec.scales))
+        if scale not in codec.scales:
+            raise InvalidValue(f"'scale' must be one of: {', '.join(codec.scales)}")
+        return scale
 
-    def _reading(self, control: Control, fmt: str | None) -> Reading:
+    def _reading(self, control: Control, scale: str | None) -> Reading:
         stored = self._store.get(control.path)
         if control.codec is None:
             return Reading(stored)
-        return Reading(control.codec.decode(stored, fmt), fmt)
+        return control.codec.decode(stored, scale)
 
-    def read(self, path: str, fmt: str | None = None) -> Reading:
+    def read(self, path: str, scale: str | None = None) -> Reading:
         control = self._control(path)
-        return self._reading(control, self._format(control, fmt))
+        return self._reading(control, self._scale(control, scale))
 
     async def write(
         self,
         path: str,
         value: object,
-        fmt: str | None = None,
-        response_fmt: str | None = None,
+        scale: str | None = None,
+        response_scale: str | None = None,
     ) -> Reading:
-        """fmt is the unit of value; the response uses response_fmt, else fmt."""
+        """scale is that of value; the response uses response_scale, else scale."""
         control = self._control(path)
         codec = self._codec(control)
-        fmt = self._format(control, fmt)
-        response_fmt = (
-            fmt if response_fmt is None else self._format(control, response_fmt)
+        scale = self._scale(control, scale)
+        response_scale = (
+            scale if response_scale is None else self._scale(control, response_scale)
         )
-        if await self._store.set(path, codec.encode(value, fmt)) is None:
+        if await self._store.set(path, codec.encode(value, scale)) is None:
             raise Rejected(f"MOTU did not accept the change to {path}")
-        return self._reading(control, response_fmt)
+        return self._reading(control, response_scale)
 
     async def toggle(self, path: str) -> Reading:
         control = self._control(path)
-        if not self._codec(control).toggleable:
+        if not isinstance(self._codec(control), BoolCodec):
             raise NotToggleable(f"{path} is not an on/off control")
         if await self._store.toggle(path) is None:
             raise Rejected(f"MOTU did not accept the change to {path}")

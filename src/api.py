@@ -1,4 +1,5 @@
 import logging
+import math
 
 from aioprometheus import MetricsMiddleware
 from aioprometheus.asgi.quart import metrics
@@ -69,12 +70,12 @@ feedback_map = binding.FeedbackMap.from_raw(mappings.feedback_map)
 
 motu_controller = binding.MotuController(
     control_map,
-    fader_scale=binding.FADER_SCALE,
+    fader_taper=binding.FADER_TAPER,
 )
 panel_controller = binding.PanelController(
     feedback_map,
-    fader_scale=binding.FADER_SCALE,
-    meter_scale=binding.METER_SCALE,
+    fader_taper=binding.FADER_TAPER,
+    meter_taper=binding.METER_TAPER,
 )
 
 motu_controller.set_datastore(motu_ds)
@@ -141,7 +142,9 @@ async def handle_http_exception(
 # MOTU mixer
 # ---------------------------------------------------------------------------
 
-mixer_service = mixer.MixerService(motu_ds, scales={"raw-panel": binding.FADER_SCALE})
+mixer_service = mixer.MixerService(
+    motu_ds, scales={"fader": mixer.TaperedScale(binding.FADER_TAPER)}
+)
 
 ERROR_STATUS: dict[type[mixer.MixerError], int] = {
     mixer.NotLoaded: 503,
@@ -158,10 +161,25 @@ async def handle_mixer_error(error: mixer.MixerError) -> tuple[dict, int]:
     return {"error": str(error)}, ERROR_STATUS.get(type(error), 500)
 
 
+def _from_json(value: object) -> object:
+    """JSON has no infinity: null is silence (-inf dB).
+
+    Infinity and NaN, which the JSON parser also accepts, are not valid JSON.
+    """
+    if value is None:
+        return -math.inf
+    if isinstance(value, float) and not math.isfinite(value):
+        raise BadRequest("'value' must be a finite number")
+    return value
+
+
+def _to_json(value: object) -> object:
+    """JSON has no infinity: silence (-inf dB) is null."""
+    return None if isinstance(value, float) and not math.isfinite(value) else value
+
+
 def _response(reading: mixer.Reading) -> dict:
-    if reading.format is None:
-        return {"value": reading.value}
-    return {"value": reading.value, "format": reading.format}
+    return {"value": _to_json(reading.value), **reading.meta}
 
 
 async def _body() -> dict:
@@ -180,8 +198,7 @@ MIX_ROUTE = "/api/v1/motu/mix/<path:path>"
 
 @app.route(MIX_ROUTE, methods=["GET"])
 async def mix_get(path: str) -> dict:
-    fmt = request.args.get("format")
-    return _response(mixer_service.read(f"mix/{path}", fmt))
+    return _response(mixer_service.read(f"mix/{path}", request.args.get("scale")))
 
 
 @app.route(MIX_ROUTE, methods=["PUT"])
@@ -189,7 +206,10 @@ async def mix_put(path: str) -> dict:
     body = await _body()
     return _response(
         await mixer_service.write(
-            f"mix/{path}", body["value"], body.get("format"), request.args.get("format")
+            f"mix/{path}",
+            _from_json(body["value"]),
+            body.get("scale"),
+            request.args.get("scale"),
         )
     )
 

@@ -23,4 +23,4 @@ Roadmap for [motu-bridge](README.md).
 - [x] Replace requests with aiohttp
 - [ ] Replace connection-state polling loops in the panel client with asyncio.Event
 - [ ] Add a REST endpoint for sending JSON and ASCII commands to the panel
-- [ ] Adjust the panel fader curve to match the MOTU mixer or a common console taper, and make it configurable
+- [ ] Adjust the panel fader taper to match the MOTU mixer or a common console taper, and make it configurable
