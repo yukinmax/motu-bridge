@@ -85,7 +85,7 @@ def _lerp(value: float, segments: tuple) -> float:
 
 
 class RangeMap:
-    """A panel scale built from a range table, convertible to and from dB."""
+    """A DbTaper built from a range table."""
 
     def __init__(self, mapping: tuple) -> None:
         self._to_db = _segments(mapping)
@@ -98,8 +98,8 @@ class RangeMap:
         return int(_lerp(float(db), self._from_db))
 
 
-FADER_SCALE = RangeMap(FADERS_RANGE_MAPPING)
-METER_SCALE = RangeMap(METERS_RANGE_MAPPING)
+FADER_TAPER = RangeMap(FADERS_RANGE_MAPPING)
+METER_TAPER = RangeMap(METERS_RANGE_MAPPING)
 
 
 def role_from_path(path: str) -> str:
@@ -233,9 +233,9 @@ class FeedbackMap(_Map):
 class MotuController:
     """Panel HWC → Motu datastore."""
 
-    def __init__(self, control_map: ControlMap, *, fader_scale: RangeMap) -> None:
+    def __init__(self, control_map: ControlMap, *, fader_taper: RangeMap) -> None:
         self._map = control_map
-        self._fader_scale = fader_scale
+        self._fader_taper = fader_taper
         self._ds = None
         self._role_handlers = {
             "send": self._handle_send,
@@ -307,7 +307,7 @@ class MotuController:
                 levels.LEVEL_DECIMALS,
             )
             return default if current != default else 1.0
-        db = self._fader_scale.to_db(raw)
+        db = self._fader_taper.to_db(raw)
         return levels.db_to_level(db)
 
     async def _handle_send(self, cfg: BindingConfig, v: str, hwcid: str | int) -> None:
@@ -361,12 +361,12 @@ class PanelController:
         self,
         feedback_map: FeedbackMap,
         *,
-        fader_scale: RangeMap,
-        meter_scale: RangeMap,
+        fader_taper: RangeMap,
+        meter_taper: RangeMap,
     ) -> None:
         self._map = feedback_map
-        self._fader_scale = fader_scale
-        self._meter_scale = meter_scale
+        self._fader_taper = fader_taper
+        self._meter_taper = meter_taper
         self._panel = None
         self._ds = None
         self._ms = None
@@ -556,7 +556,7 @@ class PanelController:
                 self._update_meter_multiplier_for_path(path)
                 if tail in ("send", "fader"):
                     db_value = levels.level_to_db(value)
-                    raw_value = self._fader_scale.from_db(db_value)
+                    raw_value = self._fader_taper.from_db(db_value)
             for target in mapping:
                 handler = self._kind_handlers.get(target.kind)
                 if handler is None:
@@ -608,7 +608,7 @@ class PanelController:
         """Meter sample (0 to METER_SCALE) → panel raw."""
         linear = value * multiplier / motu.METER_SCALE
         db = levels.level_to_db(linear)
-        return self._meter_scale.from_db(db)
+        return self._meter_taper.from_db(db)
 
     @staticmethod
     def _split_meter_payload(

@@ -19,5 +19,8 @@ def level_to_db(value: int | float) -> float:
 
 
 def db_to_level(db_value: int | float) -> float:
-    """dB to linear gain. -inf returns 0."""
-    return 10 ** (float(db_value) / 20)
+    """dB to linear gain. -inf returns 0, beyond the float range inf."""
+    try:
+        return 10 ** (float(db_value) / 20)
+    except OverflowError:
+        return math.inf
