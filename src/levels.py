@@ -1,4 +1,4 @@
-"""Gain level conversions shared by the panel and the API."""
+"""Gain and dB conversions shared by the panel and the API."""
 
 import math
 
@@ -10,17 +10,17 @@ def limit_to_range(value: float, minimum: float, maximum: float) -> float:
     return max(min(value, maximum), minimum)
 
 
-def level_to_db(value: int | float) -> float:
+def gain_to_db(gain: int | float) -> float:
     """Linear gain to dB. 0 returns -inf."""
-    value = float(value)
-    if value == 0:
+    gain = float(gain)
+    if gain == 0:
         return -math.inf
-    return 20 * math.log10(value)
+    return 20 * math.log10(gain)
 
 
-def db_to_level(db_value: int | float) -> float:
+def db_to_gain(db: int | float) -> float:
     """dB to linear gain. -inf returns 0, beyond the float range inf."""
     try:
-        return 10 ** (float(db_value) / 20)
+        return 10 ** (float(db) / 20)
     except OverflowError:
         return math.inf

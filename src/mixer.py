@@ -69,7 +69,7 @@ def _number(value: object) -> float:
 
 
 def _json_number(value: float) -> float | None:
-    """JSON has no infinity or NaN, so -inf (silence in dB) becomes null."""
+    """Rounded to 10 decimals; JSON has no infinity or NaN, so -inf becomes null."""
     return round(value, 10) if math.isfinite(value) else None
 
 
@@ -123,11 +123,11 @@ class DecibelScale:
 
     def to_gain(self, number: object) -> float:
         """dB -> gain; None is silence."""
-        return 0.0 if number is None else levels.db_to_level(_number(number))
+        return 0.0 if number is None else levels.db_to_gain(_number(number))
 
     def from_gain(self, gain: float) -> float:
         """Gain -> dB; silence is -inf."""
-        return levels.level_to_db(gain)
+        return levels.gain_to_db(gain)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,11 +138,11 @@ class TaperedScale:
 
     def to_gain(self, number: object) -> float:
         """Taper position -> gain, via dB."""
-        return levels.db_to_level(self.taper.to_db(_number(number)))
+        return levels.db_to_gain(self.taper.to_db(_number(number)))
 
     def from_gain(self, gain: float) -> float:
         """Gain -> taper position, via dB."""
-        return self.taper.from_db(levels.level_to_db(gain))
+        return self.taper.from_db(levels.gain_to_db(gain))
 
 
 LINEAR = LinearScale()
@@ -317,7 +317,7 @@ class Store(Protocol):
 
 
 class MixerService:
-    """Reads and writes mixer values with validation and unit conversion."""
+    """Reads and writes mixer values with validation and level scale conversion."""
 
     def __init__(
         self, store: Store, *, scales: Mapping[str, LevelScale] | None = None

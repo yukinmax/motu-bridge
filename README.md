@@ -60,7 +60,7 @@ The application is wired together in `src/api.py`. At startup it opens the share
 ├── LICENSE                   GNU Affero General Public License v3.0
 └── src/
     ├── api.py                Quart app, REST API, /metrics, startup and shutdown wiring
-    ├── mixer.py              MOTU mixer controls, value validation and unit conversion
+    ├── mixer.py              MOTU mixer controls, value validation and level scale conversion
     ├── levels.py             Linear gain and dB conversions
     ├── binding.py            Controllers, control and feedback maps, raw/dB conversion
     ├── mappings.py           HWC to MOTU path control table and MOTU path to panel feedback table
@@ -232,7 +232,7 @@ Levels can be read and written on any of these scales:
 
 - `linear` (default): linear gain, the MOTU's native value
 - `db`: decibels
-- `fader`: the panel's fader scale
+- `fader`: the panel's fader position, from 0 to 1000
 
 The `scale` field in a `PUT` body sets the scale of `value`. The optional `scale` query parameter sets the scale of the response, and defaults to the body's `scale` on `PUT`. Both apply to levels only.
 

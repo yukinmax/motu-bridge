@@ -37,7 +37,7 @@ OVERRIDE_PATH = "mix/monitor/0/override"
 OVERRIDE_BASE = 1024.0
 OVERRIDE_DISABLED = -1.0
 
-# Ends of the panel fader and meter scales, in dB.
+# Ends of the panel fader and meter tapers, in dB.
 MIN_DB = -120
 MAX_DB = 12
 
@@ -91,8 +91,8 @@ class RangeMap:
         self._to_db = _segments(mapping)
         self._from_db = _segments(mapping, reverse=True)
 
-    def to_db(self, value: float) -> float:
-        return _lerp(float(value), self._to_db)
+    def to_db(self, position: float) -> float:
+        return _lerp(float(position), self._to_db)
 
     def from_db(self, db: float) -> int:
         return int(_lerp(float(db), self._from_db))
@@ -303,12 +303,12 @@ class MotuController:
                 return 1.0
             # Rounded like the MOTU stores it, so it compares equal after a poll.
             default = round(
-                levels.db_to_level(min(cfg.default_level_db, MAX_DB)),
+                levels.db_to_gain(min(cfg.default_level_db, MAX_DB)),
                 levels.LEVEL_DECIMALS,
             )
             return default if current != default else 1.0
         db = self._fader_taper.to_db(raw)
-        return levels.db_to_level(db)
+        return levels.db_to_gain(db)
 
     async def _handle_send(self, cfg: BindingConfig, v: str, hwcid: str | int) -> None:
         level = self._level_from_panel_value(cfg, v)
@@ -555,7 +555,7 @@ class PanelController:
             if tail in ("mute", "fader", "send"):
                 self._update_meter_multiplier_for_path(path)
                 if tail in ("send", "fader"):
-                    db_value = levels.level_to_db(value)
+                    db_value = levels.gain_to_db(value)
                     raw_value = self._fader_taper.from_db(db_value)
             for target in mapping:
                 handler = self._kind_handlers.get(target.kind)
@@ -606,8 +606,8 @@ class PanelController:
 
     def _meter_level_to_raw(self, value: int, *, multiplier: float = 1.0) -> int:
         """Meter sample (0 to METER_SCALE) → panel raw."""
-        linear = value * multiplier / motu.METER_SCALE
-        db = levels.level_to_db(linear)
+        gain = value * multiplier / motu.METER_SCALE
+        db = levels.gain_to_db(gain)
         return self._meter_taper.from_db(db)
 
     @staticmethod
