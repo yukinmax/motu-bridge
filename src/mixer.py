@@ -140,7 +140,7 @@ class DecibelScale:
 
     def to_gain(self, number: object) -> float:
         """dB -> gain; -inf is silence."""
-        return 0.0 if number == -math.inf else db_to_gain(_number(number))
+        return db_to_gain(number if number == -math.inf else _number(number))
 
     def from_gain(self, gain: float) -> float:
         """Gain -> dB; silence is -inf."""

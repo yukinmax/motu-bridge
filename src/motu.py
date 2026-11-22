@@ -35,7 +35,7 @@ def generate_client_id() -> int:
 
 @dataclass(slots=True)
 class _HttpResult:
-    """Minimal response shape used by _Store / DataStore. 304 has no body."""
+    """Minimal response shape used by _Endpoint and DataStore. 304 has no body."""
 
     status_code: int
     reason: str | None
@@ -154,7 +154,9 @@ class HTTPClient:
             await asyncio.sleep(self._retry_interval)
 
 
-class _Store:
+class _Endpoint:
+    """A MOTU HTTP endpoint, long-polled with ETags; keeps a local copy of its data."""
+
     def __init__(
         self,
         http: HTTPClient,
@@ -272,7 +274,7 @@ class _Store:
         self._change_controller = controller
 
 
-class DataStore(_Store):
+class DataStore(_Endpoint):
     def __init__(
         self,
         http: HTTPClient,
@@ -328,7 +330,7 @@ class DataStore(_Store):
         return await self.set(path, float(not current))
 
 
-class Meters(_Store):
+class Meters(_Endpoint):
     def __init__(
         self,
         http: HTTPClient,
