@@ -58,15 +58,16 @@ The application is wired together in `src/api.py`. At startup it opens the share
 ├── uv.lock                   Locked dependencies
 ├── TODO.md                   Roadmap
 ├── LICENSE                   GNU Affero General Public License v3.0
-└── src/
-    ├── api.py                Quart app, REST API, /metrics, startup and shutdown wiring
-    ├── mixer.py              MOTU mixer controls, value validation and level scale conversion
-    ├── binding.py            Controllers, control and feedback maps, raw/dB conversion
-    ├── mappings.py           HWC to MOTU path control table and MOTU path to panel feedback table
-    ├── motu.py               Async HTTP client, MOTU datastore and meters long-polling
-    ├── raw_panel.py          SKAARHOJ RAW panel TCP client and message builders
-    ├── settings.py           Layered settings (environment, TOML file, defaults)
-    └── hypercorn_config.py   Hypercorn settings (bind address, log level, startup timeout, log propagation)
+├── src/
+│   ├── api.py                Quart app, REST API, /metrics, startup and shutdown wiring
+│   ├── mixer.py              MOTU mixer controls, value validation and level scale conversion
+│   ├── binding.py            Controllers, control and feedback maps, raw/dB conversion
+│   ├── mappings.py           HWC to MOTU path control table and MOTU path to panel feedback table
+│   ├── motu.py               Async HTTP client, MOTU datastore and meters long-polling
+│   ├── raw_panel.py          SKAARHOJ RAW panel TCP client and message builders
+│   ├── settings.py           Layered settings (environment, TOML file, defaults)
+│   └── hypercorn_config.py   Hypercorn settings (bind address, log level, startup timeout, log propagation)
+└── tests/                    pytest suite, with a trimmed MOTU datastore as its fixture
 ```
 
 ## Requirements
@@ -267,6 +268,16 @@ Prometheus metrics are exposed at `GET /metrics` using the [aioprometheus](https
 - `responses_total_counter`
 - `status_codes_counter`
 - `exceptions_total_counter`
+
+## Development
+
+`uv sync` installs the dev tools along with the app. The tests use fakes for the MOTU and the panel, so they need neither device nor a config file:
+
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+```
 
 ## Roadmap
 
