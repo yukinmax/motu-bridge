@@ -21,6 +21,7 @@ Roadmap for [motu-bridge](README.md).
 - [x] Implement config file
 - [ ] Decouple API service, MOTU connection handling and Skaarhoj Panel connection handling
 - [x] Replace requests with aiohttp
+- [x] Add tests and CI
 - [ ] Replace connection-state polling loops in the panel client with asyncio.Event
 - [ ] Add a REST endpoint for sending JSON and ASCII commands to the panel
 - [ ] Adjust the panel fader taper to match the MOTU mixer or a common console taper, and make it configurable

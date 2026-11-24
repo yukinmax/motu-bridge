@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use the oldest Python that pyproject.toml supports
+        run: |
+          python3 - >> "$GITHUB_ENV" <<'PY'
+          import tomllib
+
+          with open("pyproject.toml", "rb") as f:
+              requires = tomllib.load(f)["project"]["requires-python"]
+          print("UV_PYTHON=" + requires.removeprefix(">="))
+          PY
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - run: uv run ruff check .
+
+      - run: uv run ruff format --check .
+
+      - run: uv run pytest

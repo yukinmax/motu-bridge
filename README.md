@@ -52,6 +52,7 @@ The application is wired together in `src/api.py`. At startup it opens the share
 
 ```text
 .
+├── .github/workflows/ci.yml  CI: ruff and pytest on every push to master and pull request
 ├── Dockerfile                Multi-stage build, runs as a non-root user
 ├── config.example.toml       Commented example configuration file
 ├── pyproject.toml            Project metadata and dependencies (uv)
@@ -278,6 +279,8 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 ```
+
+CI runs the same checks on the oldest Python that `requires-python` in `pyproject.toml` allows.
 
 ## Roadmap
 
