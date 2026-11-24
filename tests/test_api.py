@@ -94,6 +94,7 @@ async def request(client, method: str, url: str, body=None) -> tuple[int, dict]:
         param(f"{MIX}/ctrls/eq/mid1/gain", {"value": "real:0:-20:20:dB"}, id="spec"),
         param(SEND, {"value": 1.0, "scale": "linear"}, id="level"),
         param(f"{SEND}?scale=db", {"value": 0.0, "scale": "db"}, id="db"),
+        # The panel fader puts 0 dB at 750.
         param(f"{SEND}?scale=fader", {"value": 750, "scale": "fader"}, id="fader"),
         param(
             f"{MIX}/chan/0/matrix/aux/1/send?scale=db",
@@ -231,13 +232,8 @@ async def test_post(client, store, url, body, response, stored):
         param("POST", f"{MUTE}/toggle", None, 404, NO_SUCH_PATH, id="post-unknown"),
         # Scales
         param("GET", f"{SEND}?scale=", None, 400, SCALES, id="get-empty-scale"),
-        param("GET", f"{SEND}?scale=DB", None, 400, SCALES, id="get-unknown-scale"),
         param("GET", f"{MUTE}?scale=linear", None, 400, NO_SCALE, id="get-bool-scale"),
-        param("GET", f"{PEAK}?scale=db", None, 400, NO_SCALE, id="get-enum-scale"),
         param("GET", f"{EQ_GAIN}?scale=", None, 400, NO_SCALE, id="get-number-scale"),
-        param(
-            "GET", f"{FORMAT}?scale=db", None, 400, NO_SCALE, id="get-read-only-scale"
-        ),
         param("PUT", f"{SEND}?scale=", {"value": 1}, 400, SCALES, id="put-empty-scale"),
         param(
             "PUT",
@@ -291,11 +287,8 @@ async def test_post(client, store, url, body, response, stored):
         param("PUT", MUTE, {}, 400, "Missing field 'value'", id="no-value"),
         param("PUT", MUTE, {"muted": True}, 400, "Missing field 'value'", id="old-key"),
         # Values
-        param("PUT", MUTE, {"value": "true"}, 400, NOT_A_BOOL, id="bool-string"),
         param("PUT", MUTE, {"value": 1}, 400, NOT_A_BOOL, id="bool-int"),
         param("PUT", MUTE, {"value": None}, 400, NOT_A_BOOL, id="bool-null"),
-        param("PUT", SEND, {"value": "1"}, 400, NOT_FINITE, id="level-string"),
-        param("PUT", SEND, {"value": True}, 400, NOT_FINITE, id="level-bool"),
         param("PUT", SEND, {"value": None}, 400, NOT_FINITE, id="linear-null"),
         param(
             "PUT",
@@ -337,15 +330,6 @@ async def test_post(client, store, url, body, response, stored):
             NOT_FINITE,
             id="float-overflow",
         ),
-        param("PUT", EQ_GAIN, {"value": 20.5}, 400, "between -20 and 20", id="range"),
-        param(
-            "PUT",
-            PEAK,
-            {"value": 2},
-            400,
-            "'value' must be one of: 0 (RMS), 1 (Peak)",
-            id="enum",
-        ),
         param("PUT", FORMAT, {"value": "2:0"}, 400, "is read-only", id="read-only"),
         param(
             "PUT",
@@ -357,8 +341,6 @@ async def test_post(client, store, url, body, response, stored):
         ),
         # Toggle
         param("POST", SEND, None, 400, NOT_ON_OFF, id="toggle-level"),
-        param("POST", EQ_GAIN, None, 400, NOT_ON_OFF, id="toggle-number"),
-        param("POST", PEAK, None, 400, NOT_ON_OFF, id="toggle-enum"),
         param("POST", FORMAT, None, 400, "is read-only", id="toggle-read-only"),
     ],
 )

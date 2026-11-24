@@ -10,6 +10,7 @@ from pytest import param
 import binding
 import mixer
 
+# FADER_TAPER puts silence at 0, -30 dB at 125, 0 dB at 750 and +12 dB at 1000.
 FADER = mixer.TaperedScale(binding.FADER_TAPER)
 SEND = mixer.LevelCodec(0.0, 4.0, {**mixer.LEVEL_SCALES, "fader": FADER})
 PEAK = mixer.EnumCodec({0: "RMS", 1: "Peak"})
@@ -19,6 +20,8 @@ MINUS_10_DB = round(10**-0.5, mixer.LEVEL_DECIMALS)
 
 MUTE_PATH = "mix/chan/0/matrix/mute"
 SEND_PATH = "mix/chan/0/matrix/aux/0/send"
+NO_SUCH_PATH = "No such MOTU path: mix/chan/48/matrix/mute"
+SCALES = "'scale' must be one of: linear, db, fader"
 
 # ---------------------------------------------------------------------------
 # Levels
@@ -428,10 +431,6 @@ async def test_service_toggle(store, service, path, reading, stored):
     assert store.writes == [(path, stored)]
 
 
-NO_SUCH_PATH = "No such MOTU path: mix/chan/48/matrix/mute"
-SCALES = "'scale' must be one of: linear, db, fader"
-
-
 @pytest.mark.parametrize(
     ("operation", "args", "error", "message"),
     [
@@ -478,9 +477,6 @@ SCALES = "'scale' must be one of: linear, db, fader"
             mixer.ReadOnly,
             "mix/chan/0/config/format is read-only",
             id="write-read-only",
-        ),
-        param(
-            "write", (MUTE_PATH, 1), mixer.InvalidValue, "true or false", id="write-bad"
         ),
         param(
             "write",

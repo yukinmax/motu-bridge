@@ -233,12 +233,36 @@ async def test_process_buffers_sends_the_latest_change(panel, recorder):
     await panel.handle_request("HWC#13=Abs:600")
     task = asyncio.create_task(panel.process_buffers())
     try:
-        await asyncio.wait_for(recorder.changed.wait(), 1)
+        async with asyncio.timeout(1):
+            await recorder.changed.wait()
     finally:
         panel.stop()
         await task
     assert recorder.changes == [({"hwcid": "13", "value": "600"}, "raw_panel", None)]
     assert panel.sent == [panel.cmd_wakeup()]
+
+
+async def test_process_buffers_waits_for_the_delay(make_panel, recorder):
+    panel = make_panel(delay=0.2)
+    panel.set_change_controller(recorder)
+    await panel.handle_request("HWC#13=Abs:600")
+    task = asyncio.create_task(panel.process_buffers())
+    try:
+        await asyncio.sleep(0.1)
+        assert recorder.changes == []
+        async with asyncio.timeout(1):
+            await recorder.changed.wait()
+    finally:
+        panel.stop()
+        await task
+
+
+async def test_wakeup_is_throttled(make_panel):
+    panel = make_panel(wakeup_min_interval=60)
+    await panel.wakeup(force=True)
+    await panel.wakeup()
+    await panel.wakeup(force=True)
+    assert panel.sent == [panel.cmd_wakeup()] * 2
 
 
 # ---------------------------------------------------------------------------

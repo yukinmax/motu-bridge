@@ -1,6 +1,8 @@
 """MOTU endpoints over the fake HTTP client."""
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from pytest import param
 
 import motu
@@ -57,6 +59,46 @@ def test_dict_diff(old, new, diff):
 
 
 # ---------------------------------------------------------------------------
+# HTTPClient, over a local aiohttp server
+# ---------------------------------------------------------------------------
+
+
+# HTTPClient asks aiohttp for enable_cleanup_closed, which newer Pythons no
+# longer need and warn about.
+@pytest.mark.filterwarnings("ignore:enable_cleanup_closed ignored:DeprecationWarning")
+@pytest.mark.parametrize(
+    ("statuses", "result", "etags_sent"),
+    [
+        param([200], _ok({"a": 1}, "7"), ["5"], id="ok"),
+        param([304], motu._HttpResult(304, "Not Modified", "7"), ["5"], id="304"),
+        param([500, 200], _ok({"a": 1}, "7"), ["5", None], id="retry-drops-etag"),
+        param([500, 500], None, ["5", None], id="gives-up"),
+    ],
+)
+async def test_http_client_request(statuses, result, etags_sent):
+    seen = []
+
+    async def handler(request):
+        seen.append(request.headers.get("If-None-Match"))
+        status = statuses[len(seen) - 1]
+        if status == 200:
+            return web.json_response({"a": 1}, headers={"ETag": "7"})
+        return web.Response(status=status, headers={"ETag": "7"})
+
+    app = web.Application()
+    app.router.add_get("/datastore", handler)
+    http = motu.HTTPClient(retry_interval=0, connector_limit=1)
+    async with TestServer(app) as server:
+        await http.start()
+        try:
+            url = str(server.make_url("/datastore"))
+            assert await http.request(url, etag="5", retries=1) == result
+        finally:
+            await http.close()
+    assert seen == etags_sent
+
+
+# ---------------------------------------------------------------------------
 # DataStore
 # ---------------------------------------------------------------------------
 
@@ -87,8 +129,8 @@ async def test_datastore_set_rejected(datastore, http, recorder):
 @pytest.mark.parametrize(
     ("data", "result"),
     [
-        param({MUTE: 1.0}, 0.0, id="on"),
-        param({MUTE: 0}, 1.0, id="off"),
+        param({MUTE: 1.0}, 0.0, id="turns-off"),
+        param({MUTE: 0}, 1.0, id="turns-on"),
         param({}, None, id="missing"),
     ],
 )
