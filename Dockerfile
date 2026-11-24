@@ -1,9 +1,9 @@
 # --- Stage 1: Build dependencies ---
-FROM ghcr.io/astral-sh/uv:python3.11-alpine AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-alpine AS builder
 
 # Set working directory and configure environment variables
 WORKDIR /app
-ENV UV_PYTHON=python3.11
+ENV UV_PYTHON=python3.14
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_PROJECT_ENVIRONMENT="/usr/local"
@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # --- Stage 2: Final minimal production image ---
-FROM python:3.11-alpine AS runner
+FROM python:3.14-alpine AS runner
 
 WORKDIR /app
 
@@ -25,7 +25,7 @@ RUN adduser -D -S -u 8888 motu && chown -R motu /app
 USER motu
 
 # Copy the globally installed packages from the builder stage
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code

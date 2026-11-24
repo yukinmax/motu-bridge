@@ -594,7 +594,7 @@ class PanelController:
     def _get_meter_sample(samples: list | None, index: int | None) -> float | None:
         try:
             return samples[index]
-        except (KeyError, IndexError, TypeError):
+        except KeyError, IndexError, TypeError:
             return None
 
     def _get_channel_by_slot(self, channels: tuple[int, ...], slot: int) -> int | None:

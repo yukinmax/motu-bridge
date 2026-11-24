@@ -70,7 +70,6 @@ class HTTPClient:
         connector = aiohttp.TCPConnector(
             limit=self._connector_limit,
             ttl_dns_cache=300,
-            enable_cleanup_closed=True,
         )
         self._session = aiohttp.ClientSession(
             timeout=timeout,

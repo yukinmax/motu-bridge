@@ -63,9 +63,6 @@ def test_dict_diff(old, new, diff):
 # ---------------------------------------------------------------------------
 
 
-# HTTPClient asks aiohttp for enable_cleanup_closed, which newer Pythons no
-# longer need and warn about.
-@pytest.mark.filterwarnings("ignore:enable_cleanup_closed ignored:DeprecationWarning")
 @pytest.mark.parametrize(
     ("statuses", "result", "etags_sent"),
     [
