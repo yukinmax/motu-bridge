@@ -121,15 +121,6 @@ def panel_settings() -> dict:
 
 
 @pytest.fixture
-def make_panel(panel_settings):
-    """Build a RecordingPanel with some settings overridden."""
-
-    def make(**overrides) -> RecordingPanel:
-        return RecordingPanel(**{**panel_settings, **overrides})
-
-    return make
-
-
-@pytest.fixture
-def panel(make_panel) -> RecordingPanel:
-    return make_panel()
+def panel(request, panel_settings) -> RecordingPanel:
+    """A RecordingPanel; override settings with indirect parametrization."""
+    return RecordingPanel(**{**panel_settings, **getattr(request, "param", {})})

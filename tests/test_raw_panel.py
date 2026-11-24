@@ -242,8 +242,8 @@ async def test_process_buffers_sends_the_latest_change(panel, recorder):
     assert panel.sent == [panel.cmd_wakeup()]
 
 
-async def test_process_buffers_waits_for_the_delay(make_panel, recorder):
-    panel = make_panel(delay=0.2)
+@pytest.mark.parametrize("panel", [{"delay": 0.2}], indirect=True, ids=["delay"])
+async def test_process_buffers_waits_for_the_delay(panel, recorder):
     panel.set_change_controller(recorder)
     await panel.handle_request("HWC#13=Abs:600")
     task = asyncio.create_task(panel.process_buffers())
@@ -257,8 +257,10 @@ async def test_process_buffers_waits_for_the_delay(make_panel, recorder):
         await task
 
 
-async def test_wakeup_is_throttled(make_panel):
-    panel = make_panel(wakeup_min_interval=60)
+@pytest.mark.parametrize(
+    "panel", [{"wakeup_min_interval": 60}], indirect=True, ids=["interval"]
+)
+async def test_wakeup_is_throttled(panel):
     await panel.wakeup(force=True)
     await panel.wakeup()
     await panel.wakeup(force=True)
