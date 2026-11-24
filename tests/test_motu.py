@@ -76,6 +76,8 @@ def test_dict_diff(old, new, diff):
     ],
 )
 async def test_http_client_request(statuses, result, etags_sent):
+    """The server answers with `statuses` in order and records the If-None-Match
+    header of each attempt. The client sends ETag 5 and may retry once."""
     seen = []
 
     async def handler(request):
@@ -166,6 +168,8 @@ async def test_datastore_refresh_failure_drops_the_etag(datastore, http):
 
 
 def test_meters_peaks_and_previous_levels(meters):
+    """Peaks are each channel's maximum over the level slots. current_index
+    follows the slot in the latest diff; previous_levels is the slot before it."""
     meters.data = {"mix/level/0": [1, 9, 0], "mix/level/1": [5, 2, 0]}
     assert meters._update_peaks() == {"mix/level/peaks": [5, 9, 0]}
     assert meters.previous_levels is None

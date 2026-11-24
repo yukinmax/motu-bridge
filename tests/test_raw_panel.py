@@ -181,26 +181,12 @@ def test_message_builders(panel, builder, args, kwargs, message):
             {"HWC": {"HWc": []}},
             id="topology",
         ),
-        param(
-            "HWC#13=Abs:600",
-            "_hw_change_buffer",
-            {"13": {"value": "Abs:600"}},
-            id="hardware-change",
-        ),
     ],
 )
 async def test_handle_request(panel, request_line, attribute, value):
     await panel.handle_request(request_line)
     state = getattr(panel, attribute)
-    assert {k: _without_time(state[k]) for k in value} == value
-
-
-def _without_time(value):
-    return (
-        {k: v for k, v in value.items() if k != "time"}
-        if isinstance(value, dict)
-        else value
-    )
+    assert {k: state[k] for k in value} == value
 
 
 @pytest.mark.parametrize(
@@ -228,6 +214,8 @@ async def test_handle_request_wake_inits_feedback(panel, recorder, monkeypatch):
 
 
 async def test_process_buffers_sends_the_latest_change(panel, recorder):
+    """Two moves of one control before the buffer runs reach the change
+    controller as one change with the latest value, after a wakeup."""
     panel.set_change_controller(recorder)
     await panel.handle_request("HWC#13=Abs:500")
     await panel.handle_request("HWC#13=Abs:600")
@@ -244,6 +232,7 @@ async def test_process_buffers_sends_the_latest_change(panel, recorder):
 
 @pytest.mark.parametrize("panel", [{"delay": 0.2}], indirect=True, ids=["delay"])
 async def test_process_buffers_waits_for_the_delay(panel, recorder):
+    """A change stays in the buffer for `delay` seconds before it is sent."""
     panel.set_change_controller(recorder)
     await panel.handle_request("HWC#13=Abs:600")
     task = asyncio.create_task(panel.process_buffers())
@@ -273,6 +262,9 @@ async def test_wakeup_is_throttled(panel):
 
 
 async def test_connect_initializes_and_receives(panel_settings):
+    """A local server stands in for the panel. It reads the 9 init commands a
+    real RawPanel sends on connect, answers one line and hangs up, so receive()
+    returns that line, then None once the connection is gone."""
     received: list[str] = []
     accepted = asyncio.Event()
 
@@ -305,6 +297,7 @@ async def test_connect_initializes_and_receives(panel_settings):
 
 
 async def test_connect_gives_up_after_retries(panel_settings):
+    # A port that was free a moment ago, with nothing listening on it.
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]

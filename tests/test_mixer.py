@@ -258,8 +258,6 @@ def test_codec_encode_rejects(codec, value, scale, message):
 # ---------------------------------------------------------------------------
 
 
-# get() returns no Control at all, rather than a read-only one.
-NO_CONTROL = object()
 GATE = mixer.LevelCodec(0.0, 1.0, SEND.scales)
 
 
@@ -308,18 +306,30 @@ GATE = mixer.LevelCodec(0.0, 1.0, SEND.scales)
         param("mix/monitor/0/solocount", None, id="section-missing"),
         param("mix/meterStripOrder", None, id="no-strip"),
         param("mix/ctrls/matrix/mute", None, id="spec-itself"),
-        param("mix/chan/48/matrix/mute", NO_CONTROL, id="not-in-store"),
-        param("mix/chan/0", NO_CONTROL, id="strip"),
-        param("chan/0/matrix/mute", NO_CONTROL, id="no-mix-prefix"),
     ],
 )
 def test_controls_get(store, path, codec):
-    """Controls as api.py builds them, with the panel's fader scale."""
+    """Controls as api.py builds them, with the panel's fader scale. A codec of
+    None is a read-only control."""
     control = mixer.Controls(store, scales={"fader": FADER}).get(path)
-    assert control == (None if codec is NO_CONTROL else mixer.Control(path, codec))
+    assert control == mixer.Control(path, codec)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        param("mix/chan/48/matrix/mute", id="not-in-store"),
+        param("mix/chan/0", id="strip"),
+        param("chan/0/matrix/mute", id="no-mix-prefix"),
+    ],
+)
+def test_controls_get_unknown(store, path):
+    assert mixer.Controls(store).get(path) is None
 
 
 def test_controls_get_caches_codecs_and_follows_the_store(store):
+    """A spec is parsed once, so a later change to it is not picked up, but a
+    value removed from the store is."""
     controls = mixer.Controls(store)
     controls.get(MUTE_PATH)
     store.data["mix/ctrls/matrix/mute"] = "real:0:0:1"
@@ -339,6 +349,7 @@ def service(store):
 
 
 async def _call(service, operation: str, *args):
+    """Run read (sync), write or toggle (async) by name."""
     result = getattr(service, operation)(*args)
     return await result if inspect.isawaitable(result) else result
 

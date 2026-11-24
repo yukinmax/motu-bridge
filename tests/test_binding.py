@@ -194,7 +194,11 @@ def controller(store, http, panel) -> binding.MotuController:
 
 def _feedback(sent: list) -> list[tuple[int, str, object]]:
     """(hwcid, field, value) for each fader position, text line and button
-    state sent to the panel, in order. Commands such as wakeup are left out."""
+    state sent to the panel, in order.
+
+    A message is one state, or a batch [{"States": [...]}] from batch_hwc whose
+    states may each list several hwcids. Commands such as wakeup are left out.
+    """
     states = []
     for message in sent:
         if isinstance(message, list):
@@ -325,6 +329,9 @@ def _feedback(sent: list) -> list[tuple[int, str, object]]:
 async def test_motu_controller_feedback(
     controller, panel, store, initial, events, stored, feedback
 ):
+    """Starting from the fixture data updated with `initial`, send the panel
+    events (hwcid, value) in order, then check the stored values and what the
+    panel got back."""
     store.data.update(initial)
     for hwcid, value in events:
         await controller.process_hwc(str(hwcid), value)
@@ -357,10 +364,13 @@ async def test_motu_controller_feedback(
     ],
 )
 async def test_panel_controller_meters(store, panel, pre_fader, initial, meter):
+    """One meters update at 0 dB on channel 0. A post-fader meter is scaled by
+    the fader gain and drops to silence when muted."""
     store.data.update(initial)
     feedback = _panel_controller(
         {
             "mix/level": {
+                # A "display<n>" target is a meter.
                 "display1": {
                     "hwcid": METER,
                     "channels": [0],

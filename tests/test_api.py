@@ -55,6 +55,7 @@ def _path(url: str) -> str:
 
 
 def _reject_constant(constant: str):
+    """NaN and Infinity are not JSON, so the API must send null instead."""
     raise ValueError(f"{constant} is not JSON")
 
 
@@ -62,13 +63,10 @@ async def request(client, method: str, url: str, body=None) -> tuple[int, dict]:
     """Status and strictly parsed JSON body; errors must be {"error": message}."""
     if isinstance(body, Raw):
         headers = {"Content-Type": body.content_type} if body.content_type else {}
-        response = await client.open(
-            url, method=method, data=body.data, headers=headers
-        )
-    elif body is not None:
-        response = await client.open(url, method=method, json=body)
+        kwargs = {"data": body.data, "headers": headers}
     else:
-        response = await client.open(url, method=method)
+        kwargs = {} if body is None else {"json": body}
+    response = await client.open(url, method=method, **kwargs)
     assert response.mimetype == "application/json"
     data = json.loads(await response.get_data(), parse_constant=_reject_constant)
     if response.status_code >= 400:
@@ -357,6 +355,7 @@ async def test_errors(client, store, method, url, body, status, message):
         param("GET", None, 503, NOT_LOADED, id="get"),
         param("PUT", {"value": True}, 503, NOT_LOADED, id="put"),
         param("POST", None, 503, NOT_LOADED, id="post"),
+        # The body is checked before the store.
         param("PUT", {}, 400, "Missing field 'value'", id="bad-body-first"),
     ],
 )
