@@ -1,9 +1,9 @@
 [project]
 name = "motu-bridge"
-version = "0.7.0"
+version = "0.8.0"
 description = "Bridge between a SKAARHOJ RAW panel and a MOTU AVB audio interface, with a REST API and Prometheus metrics"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = "AGPL-3.0-only"
 dependencies = [
     "aiohttp>=3.9.0",
