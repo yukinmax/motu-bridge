@@ -306,16 +306,7 @@ fix: keep solo override on reconnect
 
 A pull request with a single change keeps a plain description.
 
-`master` is protected by a ruleset that accepts only squash merges of pull requests whose `pr-title` check passes:
-
-- Target: the default branch
-- Restrict deletions
-- Block force pushes
-- Require a pull request: 0 approvals, squash merges only
-- Require status check: `pr-title`
-- Bypass list: empty
-
-When merging, keep the commit message GitHub fills in from the title and description.
+A pull request can be merged once its title passes the `pr-title` check. When merging, keep the commit message GitHub fills in from the title and description.
 
 Until 1.0, `feat` and breaking changes bump the minor version, `fix`, `perf`, `docs` and `revert` bump the patch version, and the other types don't trigger a release.
 
