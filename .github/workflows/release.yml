@@ -9,29 +9,24 @@ permissions: {}
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      statuses: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      # An app token, unlike GITHUB_TOKEN, triggers the pull request workflows on release PRs
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - id: release
         uses: googleapis/release-please-action@v5
-
-      # Pull requests opened with GITHUB_TOKEN don't trigger workflows, so report the
-      # required pr-title check for the release PR, whose title release-please writes
-      - name: Report the pr-title check on the release PR
-        if: steps.release.outputs.prs_created == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ fromJSON(steps.release.outputs.pr).number }}
-        run: |
-          sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" \
-            -f state=success -f context=pr-title -f description="Title written by release-please"
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
   docker:
     needs: release-please

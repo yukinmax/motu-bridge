@@ -37,16 +37,17 @@ jobs:
       - run: uv run pytest
 
   version:
-    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Leave the version to release PRs
+      - name: Check the version
         env:
           BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
         run: |
           python3 - <<'PY'
           import json
@@ -66,6 +67,15 @@ jobs:
               "uv.lock": lock_version,
               ".release-please-manifest.json": lambda text: json.loads(text)["."],
           }
+          versions = {path: read(Path(path).read_text()) for path, read in readers.items()}
+
+          if os.environ["HEAD"].startswith("release-please--"):
+              if len(set(versions.values())) > 1:
+                  found = ", ".join(f"{path} ({v})" for path, v in versions.items())
+                  print(f"::error::Release PR versions don't match: {found}.")
+                  raise SystemExit(1)
+              raise SystemExit(0)
+
           changed = []
           for path, read in readers.items():
               base = subprocess.run(
@@ -75,9 +85,9 @@ jobs:
               )
               if base.returncode != 0:
                   continue  # not on the base branch yet
-              old, new = read(base.stdout), read(Path(path).read_text())
-              if old != new:
-                  changed.append(f"{path} ({old} -> {new})")
+              old = read(base.stdout)
+              if old != versions[path]:
+                  changed.append(f"{path} ({old} -> {versions[path]})")
           if changed:
               print(
                   f"::error::Version changed in {', '.join(changed)}. "
