@@ -9,9 +9,9 @@ You need Python 3.14 or later and [uv](https://docs.astral.sh/uv/). `uv sync` in
 CI runs these checks on the oldest Python that `requires-python` in `pyproject.toml` allows, currently 3.14. The tests use fakes for the MOTU and the panel, so they need neither device nor a config file.
 
 ```bash
-UV_PYTHON=3.14 uv run ruff check .
-UV_PYTHON=3.14 uv run ruff format --check .
-UV_PYTHON=3.14 uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
 ```
 
 ## Pull requests
