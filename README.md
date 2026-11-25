@@ -54,9 +54,10 @@ The application is wired together in `src/api.py`. At startup it opens the share
 .
 ├── .github/workflows/
 │   ├── ci.yml                CI: ruff, pytest and the pull request version check
-│   ├── pr-title.yml          Checks pull request titles against the convention in Releases
+│   ├── pr-title.yml          Checks pull request titles against the convention in CONTRIBUTING.md
 │   └── release.yml           release-please release PRs, GitHub Releases and Docker images
 ├── CHANGELOG.md              Release notes, written by release-please
+├── CONTRIBUTING.md           Development setup, checks and pull request conventions
 ├── Dockerfile                Multi-stage build, runs as a non-root user
 ├── config.example.toml       Commented example configuration file
 ├── pyproject.toml            Project metadata and dependencies (uv)
@@ -278,39 +279,13 @@ Prometheus metrics are exposed at `GET /metrics` using the [aioprometheus](https
 
 ## Development
 
-`uv sync` installs the dev tools along with the app. The tests use fakes for the MOTU and the panel, so they need neither device nor a config file:
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-```
-
-CI runs the same checks on the oldest Python that `requires-python` in `pyproject.toml` allows.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the checks CI runs and the pull request conventions.
 
 ## Releases
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please). Pull requests are squash-merged, so the pull request title becomes the commit subject on master and the pull request description becomes the commit body. Titles follow [Conventional Commits](https://www.conventionalcommits.org/), and CI checks them:
+Releases are automated with [release-please](https://github.com/googleapis/release-please) from the Conventional Commits titles of squash-merged pull requests, described in [CONTRIBUTING.md](CONTRIBUTING.md). Until 1.0, `feat` and breaking changes bump the minor version, `fix`, `perf`, `docs` and `revert` bump the patch version, and the other types don't trigger a release.
 
-- The type is lowercase: `feat`, `fix`, `perf`, `refactor`, `test`, `ci`, `docs`, `build`, `style`, `chore` or `revert`
-- The description is lowercase, as in `feat: add fader hold` or `fix: keep solo override on reconnect`. release-please capitalizes the first word of each entry in [CHANGELOG.md](CHANGELOG.md).
-- A `!` after the type marks a breaking change, as in `refactor!: rename the level API`. A `BREAKING CHANGE:` footer in the description does the same.
-
-When a pull request contains several changes, list each one as its own conventional entry in the description, separated by blank lines, so each gets a changelog entry:
-
-```text
-feat: add ring presets
-
-fix: keep solo override on reconnect
-```
-
-A pull request with a single change keeps a plain description.
-
-A pull request can be merged once its title passes the `pr-title` check. When merging, keep the commit message GitHub fills in from the title and description.
-
-Until 1.0, `feat` and breaking changes bump the minor version, `fix`, `perf`, `docs` and `revert` bump the patch version, and the other types don't trigger a release.
-
-Pull requests don't change the version, and CI fails a pull request that does. release-please keeps a release pull request open that bumps the version in `pyproject.toml` and `uv.lock` and adds the changes to the changelog. Merging it tags the release as `vX.Y.Z`, creates a GitHub Release and publishes the Docker image to `ghcr.io/yukinmax/motu-bridge` with a build provenance attestation.
+release-please keeps a release pull request open that bumps the version in `pyproject.toml` and `uv.lock` and adds the changes to [CHANGELOG.md](CHANGELOG.md). Merging it tags the release as `vX.Y.Z`, creates a GitHub Release and publishes the Docker image to `ghcr.io/yukinmax/motu-bridge` with a build provenance attestation.
 
 ## Roadmap
 
