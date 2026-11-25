@@ -35,3 +35,53 @@ jobs:
       - run: uv run ruff format --check .
 
       - run: uv run pytest
+
+  version:
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Leave the version to release PRs
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+
+          def lock_version(text):
+              packages = tomllib.loads(text)["package"]
+              return next(p["version"] for p in packages if p["name"] == "motu-bridge")
+
+
+          readers = {
+              "pyproject.toml": lambda text: tomllib.loads(text)["project"]["version"],
+              "uv.lock": lock_version,
+              ".release-please-manifest.json": lambda text: json.loads(text)["."],
+          }
+          changed = []
+          for path, read in readers.items():
+              base = subprocess.run(
+                  ["git", "show", f"origin/{os.environ['BASE']}:{path}"],
+                  capture_output=True,
+                  text=True,
+              )
+              if base.returncode != 0:
+                  continue  # not on the base branch yet
+              old, new = read(base.stdout), read(Path(path).read_text())
+              if old != new:
+                  changed.append(f"{path} ({old} -> {new})")
+          if changed:
+              print(
+                  f"::error::Version changed in {', '.join(changed)}. "
+                  "Versions are bumped only by release-please release PRs."
+              )
+              raise SystemExit(1)
+          PY

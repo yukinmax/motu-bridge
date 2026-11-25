@@ -52,7 +52,11 @@ The application is wired together in `src/api.py`. At startup it opens the share
 
 ```text
 .
-├── .github/workflows/ci.yml  CI: ruff and pytest on every push to master and pull request
+├── .github/workflows/
+│   ├── ci.yml                CI: ruff, pytest and the pull request version check
+│   ├── pr-title.yml          Checks pull request titles against the convention in Releases
+│   └── release.yml           release-please release PRs, GitHub Releases and Docker images
+├── CHANGELOG.md              Release notes, written by release-please
 ├── Dockerfile                Multi-stage build, runs as a non-root user
 ├── config.example.toml       Commented example configuration file
 ├── pyproject.toml            Project metadata and dependencies (uv)
@@ -159,6 +163,8 @@ The panel layout is defined by two tables in `src/mappings.py`: `control_map` ma
 ## Running
 
 ### Docker
+
+Release images for linux/amd64 and linux/arm64 are published to `ghcr.io/yukinmax/motu-bridge`, tagged `X.Y.Z`, `X.Y` and `latest`. To build the image yourself instead:
 
 ```bash
 docker build -t motu-bridge .
@@ -281,6 +287,39 @@ uv run ruff format --check .
 ```
 
 CI runs the same checks on the oldest Python that `requires-python` in `pyproject.toml` allows.
+
+## Releases
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please). Pull requests are squash-merged, so the pull request title becomes the commit subject on master and the pull request description becomes the commit body. Titles follow [Conventional Commits](https://www.conventionalcommits.org/), and CI checks them:
+
+- The type is lowercase: `feat`, `fix`, `perf`, `refactor`, `test`, `ci`, `docs`, `build`, `style`, `chore` or `revert`
+- The description is lowercase, as in `feat: add fader hold` or `fix: keep solo override on reconnect`. release-please capitalizes the first word of each entry in [CHANGELOG.md](CHANGELOG.md).
+- A `!` after the type marks a breaking change, as in `refactor!: rename the level API`. A `BREAKING CHANGE:` footer in the description does the same.
+
+When a pull request contains several changes, list each one as its own conventional entry in the description, separated by blank lines, so each gets a changelog entry:
+
+```text
+feat: add ring presets
+
+fix: keep solo override on reconnect
+```
+
+A pull request with a single change keeps a plain description.
+
+`master` is protected by a ruleset that accepts only squash merges of pull requests whose `pr-title` check passes:
+
+- Target: the default branch
+- Restrict deletions
+- Block force pushes
+- Require a pull request: 0 approvals, squash merges only
+- Require status check: `pr-title`
+- Bypass list: empty
+
+When merging, keep the commit message GitHub fills in from the title and description.
+
+Until 1.0, `feat` and breaking changes bump the minor version, `fix`, `perf`, `docs` and `revert` bump the patch version, and the other types don't trigger a release.
+
+Pull requests don't change the version, and CI fails a pull request that does. release-please keeps a release pull request open that bumps the version in `pyproject.toml` and `uv.lock` and adds the changes to the changelog. Merging it tags the release as `vX.Y.Z`, creates a GitHub Release and publishes the Docker image to `ghcr.io/yukinmax/motu-bridge` with a build provenance attestation.
 
 ## Roadmap
 
