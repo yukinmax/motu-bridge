@@ -52,7 +52,12 @@ The application is wired together in `src/api.py`. At startup it opens the share
 
 ```text
 .
-├── .github/workflows/ci.yml  CI: ruff and pytest on every push to master and pull request
+├── .github/workflows/
+│   ├── ci.yml                CI: ruff, pytest and the pull request version check
+│   ├── pr-title.yml          Checks pull request titles against the convention in CONTRIBUTING.md
+│   └── release.yml           release-please release PRs, GitHub Releases and Docker images
+├── CHANGELOG.md              Release notes, written by release-please
+├── CONTRIBUTING.md           Development setup, checks and pull request conventions
 ├── Dockerfile                Multi-stage build, runs as a non-root user
 ├── config.example.toml       Commented example configuration file
 ├── pyproject.toml            Project metadata and dependencies (uv)
@@ -159,6 +164,8 @@ The panel layout is defined by two tables in `src/mappings.py`: `control_map` ma
 ## Running
 
 ### Docker
+
+Release images for linux/amd64 and linux/arm64 are published to `ghcr.io/yukinmax/motu-bridge`, tagged `X.Y.Z`, `X.Y` and `latest`. To build the image yourself instead:
 
 ```bash
 docker build -t motu-bridge .
@@ -272,15 +279,13 @@ Prometheus metrics are exposed at `GET /metrics` using the [aioprometheus](https
 
 ## Development
 
-`uv sync` installs the dev tools along with the app. The tests use fakes for the MOTU and the panel, so they need neither device nor a config file:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the checks CI runs and the pull request conventions.
 
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-```
+## Releases
 
-CI runs the same checks on the oldest Python that `requires-python` in `pyproject.toml` allows.
+Releases are automated with [release-please](https://github.com/googleapis/release-please) from the Conventional Commits titles of squash-merged pull requests, described in [CONTRIBUTING.md](CONTRIBUTING.md). Until 1.0, `feat` and breaking changes bump the minor version, `fix`, `perf`, `docs` and `revert` bump the patch version, and the other types don't trigger a release.
+
+release-please keeps a release pull request open that bumps the version in `pyproject.toml` and `uv.lock` and adds the changes to [CHANGELOG.md](CHANGELOG.md). Merging it tags the release as `vX.Y.Z`, creates a GitHub Release and publishes the Docker image to `ghcr.io/yukinmax/motu-bridge` with a build provenance attestation.
 
 ## Roadmap
 

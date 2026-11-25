@@ -35,3 +35,63 @@ jobs:
       - run: uv run ruff format --check .
 
       - run: uv run pytest
+
+  version:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the version
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+
+          def lock_version(text):
+              packages = tomllib.loads(text)["package"]
+              return next(p["version"] for p in packages if p["name"] == "motu-bridge")
+
+
+          readers = {
+              "pyproject.toml": lambda text: tomllib.loads(text)["project"]["version"],
+              "uv.lock": lock_version,
+              ".release-please-manifest.json": lambda text: json.loads(text)["."],
+          }
+          versions = {path: read(Path(path).read_text()) for path, read in readers.items()}
+
+          if os.environ["HEAD"].startswith("release-please--"):
+              if len(set(versions.values())) > 1:
+                  found = ", ".join(f"{path} ({v})" for path, v in versions.items())
+                  print(f"::error::Release PR versions don't match: {found}.")
+                  raise SystemExit(1)
+              raise SystemExit(0)
+
+          changed = []
+          for path, read in readers.items():
+              base = subprocess.run(
+                  ["git", "show", f"origin/{os.environ['BASE']}:{path}"],
+                  capture_output=True,
+                  text=True,
+              )
+              if base.returncode != 0:
+                  continue  # not on the base branch yet
+              old = read(base.stdout)
+              if old != versions[path]:
+                  changed.append(f"{path} ({old} -> {versions[path]})")
+          if changed:
+              print(
+                  f"::error::Version changed in {', '.join(changed)}. "
+                  "Versions are bumped only by release-please release PRs."
+              )
+              raise SystemExit(1)
+          PY
