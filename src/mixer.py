@@ -222,7 +222,11 @@ class EnumCodec:
         return Reading(int(stored))
 
     def encode(self, value: object, scale: str | None) -> float:
-        if isinstance(value, bool) or value not in self.options:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or value not in self.options
+        ):
             choices = ", ".join(f"{k} ({v})" for k, v in self.options.items())
             raise InvalidValue(f"'value' must be one of: {choices}")
         return float(value)
@@ -370,7 +374,7 @@ class MixerService:
             return None
         if scale is None:
             return next(iter(codec.scales))
-        if scale not in codec.scales:
+        if not isinstance(scale, str) or scale not in codec.scales:
             raise InvalidValue(f"'scale' must be one of: {', '.join(codec.scales)}")
         return scale
 
