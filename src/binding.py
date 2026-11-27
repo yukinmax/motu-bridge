@@ -1,14 +1,8 @@
-"""Motu ↔ panel change controllers and maps.
+"""Panel tapers, control and feedback maps, and the panel ↔ MOTU change
+controllers (feeds.ChangeHandler).
 
-Protocol shared by RawPanel and motu._Endpoint:
-
-  set_change_controller(controller)
-  controller.on_change(data, *, source: str, origin: str | None = None)
-
-Sources:
-  "raw_panel"  — HWC event: data = {"hwcid": str, "value": str}
-  "datastore"  — Motu path diff (_Endpoint.base_path)
-  "meters"     — Motu meters diff (_Endpoint.base_path)
+MotuController writes panel input through the shared mixer.MixerService.
+PanelController turns MOTU changes into panel feedback.
 """
 
 from __future__ import annotations
@@ -19,6 +13,7 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -26,12 +21,12 @@ if TYPE_CHECKING:
 
 import mixer
 import motu
+from feeds import FEED_DATASTORE, FEED_METERS, FEED_RAW_PANEL
 
 logger = logging.getLogger(__name__)
 
-SOURCE_RAW_PANEL = "raw_panel"
-SOURCE_DATASTORE = "datastore"
-SOURCE_METERS = "meters"
+# The MixerService level scale for panel fader positions (FADER_TAPER).
+FADER_SCALE = "fader"
 
 OVERRIDE_PATH = "mix/monitor/0/override"
 OVERRIDE_BASE = 1024.0
@@ -100,6 +95,10 @@ class PiecewiseTaper:
 
 FADER_TAPER = PiecewiseTaper(FADERS_RANGE_MAPPING)
 METER_TAPER = PiecewiseTaper(METERS_RANGE_MAPPING)
+# MixerService level scales for the panel, by name, besides linear and db.
+SCALES: Mapping[str, mixer.LevelScale] = MappingProxyType(
+    {FADER_SCALE: mixer.TaperedScale(FADER_TAPER)}
+)
 
 
 def role_from_path(path: str) -> str:
@@ -231,12 +230,11 @@ class FeedbackMap(_Map):
 
 
 class MotuController:
-    """Panel HWC → Motu datastore."""
+    """Panel HWC → MOTU mixer, through the shared MixerService."""
 
-    def __init__(self, control_map: ControlMap, *, fader_taper: PiecewiseTaper) -> None:
+    def __init__(self, control_map: ControlMap, service: mixer.MixerService) -> None:
         self._map = control_map
-        self._fader_taper = fader_taper
-        self._ds = None
+        self._mixer = service
         self._role_handlers = {
             "send": self._handle_send,
             "mute": self._handle_mute,
@@ -244,31 +242,38 @@ class MotuController:
             "override": self._handle_override,
         }
 
-    def set_datastore(self, datastore: motu.DataStore) -> None:
-        self._ds = datastore
+    def _read(self, path: str) -> Any | None:
+        """The current value at path, or None (logged) if it can't be read."""
+        try:
+            return self._mixer.read(path).value
+        except mixer.MixerError as e:
+            logger.warning("Unable to read path %s: %s", path, e)
+            return None
 
-    async def _set(
-        self, path: str, value: Any, *, origin: str | None = None
-    ) -> Any | None:
-        result = await self._ds.set(path, value, origin=origin)
-        if result is None:
-            logger.warning("Unable to set path %s to %s", path, value)
-        return result
+    async def _write(
+        self,
+        path: str,
+        value: object,
+        scale: str | None = None,
+        *,
+        origin: str | None = None,
+    ) -> None:
+        try:
+            await self._mixer.write(path, value, scale, origin=origin)
+        except mixer.MixerError as e:
+            logger.warning("Unable to set path %s to %s: %s", path, value, e)
 
-    async def _toggle(self, path: str) -> float | None:
-        result = await self._ds.toggle(path)
-        if result is None:
-            logger.warning("Unable to toggle path %s", path)
-        return result
+    async def _toggle(self, path: str) -> None:
+        try:
+            await self._mixer.toggle(path)
+        except mixer.MixerError as e:
+            logger.warning("Unable to toggle path %s: %s", path, e)
 
     async def on_change(
-        self, data: dict, *, source: str, origin: str | None = None
+        self, data: dict, *, feed: str, origin: str | None = None
     ) -> None:
-        if self._ds is None:
-            logger.debug("MotuController: no datastore; ignore source=%s", source)
-            return
-        if source != SOURCE_RAW_PANEL:
-            logger.debug("MotuController: ignore source=%s", source)
+        if feed != FEED_RAW_PANEL:
+            logger.debug("MotuController: ignore feed=%s", feed)
             return
         await self.process_hwc(data["hwcid"], data["value"])
 
@@ -287,34 +292,32 @@ class MotuController:
             return
         await handler(cfg, value, hwcid)
 
-    def _level_from_panel_value(self, cfg: BindingConfig, v: str) -> float | None:
-        """Panel raw to linear gain. Down toggles between the default and unity."""
-        try:
-            raw = int(v)
-        except ValueError:
-            if v != "Down":
-                return None
-            current = self._ds.get(cfg.path)
-            if current is None:
-                logger.warning("Path %s is not available", cfg.path)
-                return None
-            if cfg.default_level_db is None:
-                logger.debug("No default level for path %s", cfg.path)
-                return 1.0
-            # Rounded like the MOTU stores it, so it compares equal after a poll.
-            default = round(
-                mixer.db_to_gain(min(cfg.default_level_db, MAX_DB)),
-                mixer.LEVEL_DECIMALS,
-            )
-            return default if current != default else 1.0
-        db = self._fader_taper.to_db(raw)
-        return mixer.db_to_gain(db)
+    def _toggled_level(self, cfg: BindingConfig) -> float | None:
+        """Next linear gain: toggles between the default level and unity."""
+        current = self._read(cfg.path)
+        if current is None:
+            return None
+        if cfg.default_level_db is None:
+            logger.debug("No default level for path %s", cfg.path)
+            return 1.0
+        # Rounded like the MOTU stores it, so it compares equal after a poll.
+        default = round(
+            mixer.db_to_gain(min(cfg.default_level_db, MAX_DB)),
+            mixer.LEVEL_DECIMALS,
+        )
+        return default if current != default else 1.0
 
     async def _handle_send(self, cfg: BindingConfig, v: str, hwcid: str | int) -> None:
-        level = self._level_from_panel_value(cfg, v)
-        if level is None:
+        try:
+            position = int(v)
+        except ValueError:
+            if v != "Down":
+                return
+            level = self._toggled_level(cfg)
+            if level is not None:
+                await self._write(cfg.path, level, "linear", origin=str(hwcid))
             return
-        await self._set(cfg.path, level, origin=str(hwcid))
+        await self._write(cfg.path, position, FADER_SCALE, origin=str(hwcid))
 
     async def _handle_mute(self, cfg: BindingConfig, v: str, hwcid: str | int) -> None:
         if v != "Down":
@@ -324,12 +327,12 @@ class MotuController:
     async def _handle_solo(self, cfg: BindingConfig, v: str, hwcid: str | int) -> None:
         if v != "Down":
             return
-        override = self._ds.get(OVERRIDE_PATH)
+        override = self._read(OVERRIDE_PATH)
         if override is not None and override != OVERRIDE_DISABLED:
-            await self._set(cfg.path, 1.0)
+            await self._write(cfg.path, True)
         else:
             await self._toggle(cfg.path)
-        await self._set(OVERRIDE_PATH, OVERRIDE_DISABLED)
+        await self._write(OVERRIDE_PATH, OVERRIDE_DISABLED)
 
     async def _handle_override(
         self, cfg: BindingConfig, v: str, hwcid: str | int
@@ -339,15 +342,14 @@ class MotuController:
         if cfg.override_value is None:
             logger.warning("Missing override_index for %s", cfg.path)
             return
-        current = self._ds.get(cfg.path)
+        current = self._read(cfg.path)
         if current is None:
-            logger.warning("Path %s is not available", cfg.path)
             return
         if current == cfg.override_value:
             value = OVERRIDE_DISABLED
         else:
             value = cfg.override_value
-        await self._set(cfg.path, value)
+        await self._write(cfg.path, value)
 
 
 class PanelController:
@@ -361,12 +363,12 @@ class PanelController:
         self,
         feedback_map: FeedbackMap,
         *,
-        fader_taper: PiecewiseTaper,
-        meter_taper: PiecewiseTaper,
+        fader_taper: mixer.DbTaper,
+        meter_taper: mixer.DbTaper,
     ) -> None:
         self._map = feedback_map
-        self._fader_taper = fader_taper
-        self._meter_taper = meter_taper
+        self._fader_scale = mixer.TaperedScale(fader_taper)
+        self._meter_scale = mixer.TaperedScale(meter_taper)
         self._panel = None
         self._ds = None
         self._ms = None
@@ -405,17 +407,17 @@ class PanelController:
                 self._meter_multipliers[target.hwcid] = multiplier
 
     async def on_change(
-        self, data: dict, *, source: str, origin: str | None = None
+        self, data: dict, *, feed: str, origin: str | None = None
     ) -> None:
         if self._panel is None:
-            logger.debug("PanelController: no panel; ignore source=%s", source)
+            logger.debug("PanelController: no panel; ignore feed=%s", feed)
             return
-        if source == SOURCE_DATASTORE:
+        if feed == FEED_DATASTORE:
             await self._process_data_feedback(data, origin=origin)
-        elif source == SOURCE_METERS:
+        elif feed == FEED_METERS:
             await self._process_meters_feedback(data)
         else:
-            logger.debug("PanelController: ignore source=%s", source)
+            logger.debug("PanelController: ignore feed=%s", feed)
 
     async def init_feedback(self) -> None:
         """Seed panel from current Motu snapshots."""
@@ -474,10 +476,9 @@ class PanelController:
     def _handle_button(
         self,
         target: FeedbackTarget,
-        *,
         value: Any,
-        raw_value: int | None,
-        db_value: float | None,
+        *,
+        echo: bool = False,
         init: bool = False,
     ) -> dict:
         active = (value == target.value) if target.value is not None else bool(value)
@@ -499,10 +500,9 @@ class PanelController:
     def _handle_fader(
         self,
         target: FeedbackTarget,
-        *,
         value: Any,
-        raw_value: int | None,
-        db_value: float | None,
+        *,
+        echo: bool = False,
         init: bool = False,
     ) -> dict:
         msg: dict = {}
@@ -518,23 +518,23 @@ class PanelController:
                     target.hwcid, **self._resolve_style(target.color, True)
                 )
             )
-        if raw_value is not None:
-            msg.update(self._panel.hwc_fader(target.hwcid, raw_value))
+        if not echo:
+            position = int(self._fader_scale.from_gain(float(value)))
+            msg.update(self._panel.hwc_fader(target.hwcid, position))
         return msg
 
     def _handle_display(
         self,
         target: FeedbackTarget,
-        *,
         value: Any,
-        raw_value: int | None,
-        db_value: float | None,
+        *,
+        echo: bool = False,
         init: bool = False,
     ) -> dict:
         txt = target.text or {}
         return self._panel.hwc_text(
             target.hwcid,
-            text1=f"{db_value: 5.1f}",
+            text1=f"{mixer.gain_to_db(value): 5.1f}",
             **txt,
         )
 
@@ -549,14 +549,8 @@ class PanelController:
             if mapping is None:
                 logger.debug("path %s is not mapped", path)
                 continue
-            db_value = None
-            raw_value = None
-            tail = path.rsplit("/", 1)[-1]
-            if tail in ("mute", "fader", "send"):
+            if path.rsplit("/", 1)[-1] in ("mute", "fader", "send"):
                 self._update_meter_multiplier_for_path(path)
-                if tail in ("send", "fader"):
-                    db_value = mixer.gain_to_db(value)
-                    raw_value = self._fader_taper.from_db(db_value)
             for target in mapping:
                 handler = self._kind_handlers.get(target.kind)
                 if handler is None:
@@ -567,13 +561,7 @@ class PanelController:
                     )
                     continue
                 echo = origin is not None and str(target.hwcid) == origin
-                msg = handler(
-                    target,
-                    value=value,
-                    raw_value=None if echo else raw_value,
-                    db_value=db_value,
-                    init=init,
-                )
+                msg = handler(target, value, echo=echo, init=init)
                 if msg:
                     messages.append(msg)
         batched = self._panel.batch_hwc(messages)
@@ -606,9 +594,7 @@ class PanelController:
 
     def _meter_level_to_raw(self, value: int, *, multiplier: float = 1.0) -> int:
         """Meter sample (0 to METER_SCALE) → panel raw."""
-        gain = value * multiplier / motu.METER_SCALE
-        db = mixer.gain_to_db(gain)
-        return self._meter_taper.from_db(db)
+        return int(self._meter_scale.from_gain(value * multiplier / motu.METER_SCALE))
 
     @staticmethod
     def _split_meter_payload(

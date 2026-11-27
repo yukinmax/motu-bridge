@@ -24,6 +24,7 @@ class FakeStore:
     def __init__(self, data: dict) -> None:
         self.data = data
         self.writes: list[tuple[str, Any]] = []
+        self.origins: list[str | None] = []
         self.reject = False
 
     def get(self, path: str) -> Any | None:
@@ -31,14 +32,11 @@ class FakeStore:
 
     async def set(self, path: str, value: Any, *, origin: str | None = None) -> Any:
         self.writes.append((path, value))
+        self.origins.append(origin)
         if self.reject:
             return None
         self.data[path] = value
         return value
-
-    async def toggle(self, path: str) -> float | None:
-        current = self.get(path)
-        return None if current is None else await self.set(path, float(not current))
 
 
 class FakeHTTP:
@@ -64,8 +62,8 @@ class Recorder:
         self.changed = asyncio.Event()
         self.inits = 0
 
-    async def on_change(self, data: dict, *, source: str, origin=None) -> None:
-        self.changes.append((data, source, origin))
+    async def on_change(self, data: dict, *, feed: str, origin=None) -> None:
+        self.changes.append((data, feed, origin))
         self.changed.set()
 
     async def init_feedback(self) -> None:

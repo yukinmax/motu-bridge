@@ -6,7 +6,9 @@ import pytest
 from pytest import param
 
 import binding
+import mixer
 import motu
+from feeds import FEED_METERS
 
 SEND = "mix/chan/0/matrix/aux/0/send"
 MUTE = "mix/chan/0/matrix/mute"
@@ -185,11 +187,8 @@ def controller(store, http, panel) -> binding.MotuController:
     feedback.set_panel(panel)
     feedback.set_datastore(ds)
     ds.set_change_controller(feedback)
-    controller = binding.MotuController(
-        binding.ControlMap.from_raw(CONTROLS), fader_taper=binding.FADER_TAPER
-    )
-    controller.set_datastore(ds)
-    return controller
+    service = mixer.MixerService(ds, scales=binding.SCALES)
+    return binding.MotuController(binding.ControlMap.from_raw(CONTROLS), service)
 
 
 def _feedback(sent: list) -> list[tuple[int, str, object]]:
@@ -224,7 +223,7 @@ def _feedback(sent: list) -> list[tuple[int, str, object]]:
             {},
             [(FADER, "600")],
             # 600 is -30 + 42 * 475 / 875 = -7.2 dB.
-            {SEND: pytest.approx(10 ** (-7.2 / 20))},
+            {SEND: round(10 ** (-7.2 / 20), 6)},
             [(DISPLAY, "text", " -7.2")],
             id="fader-move-suppresses-its-echo",
         ),
@@ -340,6 +339,37 @@ async def test_motu_controller_feedback(
 
 
 @pytest.mark.parametrize(
+    ("hwcid", "value", "warning"),
+    [
+        param(FADER, "600", "Unable to set path", id="fader"),
+        param(MUTE_BUTTON, "Down", "Unable to toggle path", id="toggle"),
+        param(OVERRIDE_BUTTON, "Down", "Unable to set path", id="override"),
+    ],
+)
+async def test_motu_controller_logs_rejected_writes(
+    controller, http, panel, store, caplog, hwcid, value, warning
+):
+    """A write the MOTU rejects is logged; the store and panel are unchanged."""
+    before = dict(store.data)
+    http.responses = [None]
+    await controller.process_hwc(str(hwcid), value)
+    assert warning in caplog.text
+    assert store.data == before
+    assert panel.sent == []
+
+
+async def test_motu_controller_logs_unknown_paths(controller, panel, store, caplog):
+    """A mapped path the MOTU doesn't have is logged and nothing is written."""
+    del store.data[SEND]
+    await controller.process_hwc(DOWN, "Down")
+    await controller.process_hwc(str(FADER), "600")
+    assert "Unable to read path" in caplog.text
+    assert "Unable to set path" in caplog.text
+    assert SEND not in store.data
+    assert panel.sent == []
+
+
+@pytest.mark.parametrize(
     ("pre_fader", "initial", "meter"),
     [
         param(
@@ -387,7 +417,7 @@ async def test_panel_controller_meters(store, panel, pre_fader, initial, meter):
     # A full-scale sample on channel 0 is 0 dB.
     await feedback.on_change(
         {"mix/level/0": [motu.METER_SCALE], "mix/level/peaks": [motu.METER_SCALE]},
-        source=binding.SOURCE_METERS,
+        feed=FEED_METERS,
     )
     assert panel.sent == [
         panel.cmd_wakeup(),

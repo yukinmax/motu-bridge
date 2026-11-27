@@ -10,6 +10,8 @@ from typing import Any
 
 import aiohttp
 
+from feeds import ChangeHandler
+
 logger = logging.getLogger(__name__)
 
 # Meter samples are kept in a ring buffer of this many slots, and
@@ -178,7 +180,7 @@ class _Endpoint:
         self.etag: str | None = None
         self.client_id: int | None = None
         self.data: dict = {}
-        self._change_controller = None
+        self._change_controller: ChangeHandler | None = None
         self._stopped = False
 
     @property
@@ -232,9 +234,7 @@ class _Endpoint:
             self.data.update(data_diff)
             logger.debug("Modified: %s -> %s", self.base_path, data_diff)
             if self._change_controller and handle_changes:
-                await self._change_controller.on_change(
-                    data_diff, source=self.base_path
-                )
+                await self._change_controller.on_change(data_diff, feed=self.base_path)
             return data_diff
         return None
 
@@ -268,8 +268,7 @@ class _Endpoint:
             self.port,
         )
 
-    def set_change_controller(self, controller: Any) -> None:
-        """Attach controller implementing on_change(data, *, source, origin=None)."""
+    def set_change_controller(self, controller: ChangeHandler) -> None:
         self._change_controller = controller
 
 
@@ -318,15 +317,9 @@ class DataStore(_Endpoint):
         logger.debug("Modified: %s -> %s", self.base_path, data_diff)
         if self._change_controller:
             await self._change_controller.on_change(
-                data_diff, source=self.base_path, origin=origin
+                data_diff, feed=self.base_path, origin=origin
             )
         return value
-
-    async def toggle(self, path: str) -> float | None:
-        current = self.get(path)
-        if current is None:
-            return None
-        return await self.set(path, float(not current))
 
 
 class Meters(_Endpoint):
@@ -404,8 +397,6 @@ class Meters(_Endpoint):
             self._set_current_index(data_diff)
             data_diff.update(self._update_peaks())
             if self._change_controller and handle_changes:
-                await self._change_controller.on_change(
-                    data_diff, source=self.base_path
-                )
+                await self._change_controller.on_change(data_diff, feed=self.base_path)
             return data_diff
         return None

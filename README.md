@@ -31,11 +31,12 @@ It is an asyncio service built on [Quart](https://quart.palletsprojects.com/), s
 flowchart LR
     Panel["SKAARHOJ RAW panel"] <-->|"TCP, JSON lines"| RP["RawPanel (raw_panel.py)"]
     RP -->|"hardware changes"| MC["MotuController (binding.py)"]
-    MC -->|"PATCH datastore"| DS["DataStore + Meters (motu.py)"]
+    MC --> MS["MixerService (mixer.py)"]
+    MS -->|"PATCH datastore"| DS["DataStore + Meters (motu.py)"]
     DS <-->|"HTTP long-polling"| Motu["MOTU AVB interface"]
     DS -->|"state and meter changes"| PC["PanelController (binding.py)"]
     PC -->|"feedback"| RP
-    API["Quart REST API (api.py)"] --> DS
+    API["Quart REST API (api.py)"] --> MS
     Prom["Prometheus"] -->|"GET /metrics"| API
 ```
 
@@ -43,7 +44,8 @@ The application is wired together in `src/api.py`. At startup it opens the share
 
 - `RawPanel` owns the TCP connection to the panel. It parses panel messages, debounces hardware changes, handles reconnects and sleep/wake, and builds the panel's JSON messages.
 - `DataStore` and `Meters` long-poll the MOTU's `datastore` and `meters` HTTP endpoints using ETags, and keep a local copy of the state. `DataStore` also writes values back to the device.
-- `MotuController` translates panel events into MOTU datastore writes.
+- `MixerService` reads and writes MOTU mixer controls. It validates values against the control specifications and converts levels between scales. The REST API and the panel share one instance.
+- `MotuController` translates panel events into mixer writes and toggles through `MixerService`, so panel input gets the same validation, limits and rounding as the REST API.
 - `PanelController` translates MOTU changes into panel feedback: fader positions, button states, display text and meters.
 - `settings.py` loads the configuration from environment variables, an optional TOML file and built-in defaults.
 - `mappings.py` holds the static tables that bind panel hardware controls (HWC IDs) to MOTU datastore paths, and MOTU paths to panel feedback.
@@ -67,7 +69,8 @@ The application is wired together in `src/api.py`. At startup it opens the share
 ├── src/
 │   ├── api.py                Quart app, REST API, /metrics, startup and shutdown wiring
 │   ├── mixer.py              MOTU mixer controls, value validation and level scale conversion
-│   ├── binding.py            Controllers, control and feedback maps, raw/dB conversion
+│   ├── binding.py            Panel fader and meter tapers, control and feedback maps, change controllers
+│   ├── feeds.py              Change-handler protocol and change feeds shared by the MOTU endpoints, the panel and the controllers
 │   ├── mappings.py           HWC to MOTU path control table and MOTU path to panel feedback table
 │   ├── motu.py               Async HTTP client, MOTU datastore and meters long-polling
 │   ├── raw_panel.py          SKAARHOJ RAW panel TCP client and message builders

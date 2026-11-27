@@ -125,19 +125,6 @@ async def test_datastore_set_rejected(datastore, http, recorder):
     assert recorder.changes == []
 
 
-@pytest.mark.parametrize(
-    ("data", "result"),
-    [
-        param({MUTE: 1.0}, 0.0, id="turns-off"),
-        param({MUTE: 0}, 1.0, id="turns-on"),
-        param({}, None, id="missing"),
-    ],
-)
-async def test_datastore_toggle(datastore, data, result):
-    datastore.data = data
-    assert await datastore.toggle(MUTE) == result
-
-
 async def test_datastore_refresh_diffs_and_sends_etags(datastore, http, recorder):
     http.responses = [
         _ok({"a": 1, "b": 2}, "1"),

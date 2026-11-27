@@ -8,7 +8,7 @@ import socket
 import time
 from typing import Any
 
-from binding import SOURCE_RAW_PANEL
+from feeds import FEED_RAW_PANEL, ChangeHandler
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class RawPanel:
         self.last_activity = 0.0
         self._last_wakeup = 0.0
         self._wakeup_min_interval = wakeup_min_interval
-        self._change_controller = None
+        self._change_controller: ChangeHandler | None = None
         self._feedback_controller = None
 
     def _update_sys_stat(self, value: str) -> None:
@@ -206,7 +206,7 @@ class RawPanel:
         normalized = normalize_hwc_value(value)
         await self._change_controller.on_change(
             {"hwcid": str(hwcid), "value": normalized},
-            source=SOURCE_RAW_PANEL,
+            feed=FEED_RAW_PANEL,
         )
 
     def _configure_socket(self, writer: asyncio.StreamWriter) -> None:
@@ -244,8 +244,7 @@ class RawPanel:
         """Signal long-running loops to exit; blocks reconnect."""
         self._stopped = True
 
-    def set_change_controller(self, controller: Any) -> None:
-        """Attach controller implementing on_change(data, *, source, origin=None)."""
+    def set_change_controller(self, controller: ChangeHandler) -> None:
         self._change_controller = controller
 
     def set_feedback_controller(self, controller: Any) -> None:
