@@ -26,7 +26,7 @@ def datastore(http, recorder) -> motu.DataStore:
         mutate_timeout=2,
         mutate_retries=0,
     )
-    ds.set_change_controller(recorder)
+    ds.set_change_handler(recorder)
     return ds
 
 
@@ -35,7 +35,7 @@ def meters(http, recorder) -> motu.Meters:
     ms = motu.Meters(
         http, host="motu", port=80, refresh_timeout=None, refresh_retries=None
     )
-    ms.set_change_controller(recorder)
+    ms.set_change_handler(recorder)
     return ms
 
 
@@ -123,19 +123,6 @@ async def test_datastore_set_rejected(datastore, http, recorder):
     assert await datastore.set(MUTE, 1.0) is None
     assert datastore.data == {}
     assert recorder.changes == []
-
-
-@pytest.mark.parametrize(
-    ("data", "result"),
-    [
-        param({MUTE: 1.0}, 0.0, id="turns-off"),
-        param({MUTE: 0}, 1.0, id="turns-on"),
-        param({}, None, id="missing"),
-    ],
-)
-async def test_datastore_toggle(datastore, data, result):
-    datastore.data = data
-    assert await datastore.toggle(MUTE) == result
 
 
 async def test_datastore_refresh_diffs_and_sends_etags(datastore, http, recorder):

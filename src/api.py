@@ -13,6 +13,17 @@ import motu
 import raw_panel
 from settings import settings
 
+MIX_ROUTE = "/api/v1/motu/mix/<path:path>"
+# REST API status for each MixerError.
+ERROR_STATUS: dict[type[mixer.MixerError], int] = {
+    mixer.NotLoaded: 503,
+    mixer.NotFound: 404,
+    mixer.Rejected: 502,
+    mixer.ReadOnly: 400,
+    mixer.InvalidValue: 400,
+    mixer.NotToggleable: 400,
+}
+
 logging.basicConfig(
     level=settings.log_level,
     format="%(levelname)s [%(name)s] %(message)s",
@@ -65,30 +76,26 @@ skaarhoj_panel = raw_panel.RawPanel(
     wakeup_min_interval=settings.panel_wakeup_min_interval,
 )
 
+# Shared by the REST API and the panel.
+mixer_service = mixer.MixerService(motu_ds, scales=binding.SCALES)
+
 control_map = binding.ControlMap.from_raw(mappings.control_map)
 feedback_map = binding.FeedbackMap.from_raw(mappings.feedback_map)
 
-motu_controller = binding.MotuController(
-    control_map,
-    fader_taper=binding.FADER_TAPER,
-)
+motu_controller = binding.MotuController(control_map, mixer_service)
 panel_controller = binding.PanelController(
     feedback_map,
+    panel=skaarhoj_panel,
+    datastore=motu_ds,
+    meters=motu_ms,
     fader_taper=binding.FADER_TAPER,
     meter_taper=binding.METER_TAPER,
 )
 
-motu_controller.set_datastore(motu_ds)
-skaarhoj_panel.set_change_controller(motu_controller)
-
-panel_controller.set_panel(skaarhoj_panel)
-panel_controller.set_datastore(motu_ds)
-panel_controller.set_meters(motu_ms)
-skaarhoj_panel.set_feedback_controller(panel_controller)
-
-
-motu_ds.set_change_controller(panel_controller)
-motu_ms.set_change_controller(panel_controller)
+skaarhoj_panel.set_change_handler(motu_controller)
+skaarhoj_panel.set_feedback_handler(panel_controller)
+motu_ds.set_change_handler(panel_controller)
+motu_ms.set_change_handler(panel_controller)
 
 app.asgi_app = MetricsMiddleware(app.asgi_app)
 app.add_url_rule("/metrics", "metrics", metrics, methods=["GET"])
@@ -142,19 +149,6 @@ async def handle_http_exception(
 # MOTU mixer
 # ---------------------------------------------------------------------------
 
-mixer_service = mixer.MixerService(
-    motu_ds, scales={"fader": mixer.TaperedScale(binding.FADER_TAPER)}
-)
-
-ERROR_STATUS: dict[type[mixer.MixerError], int] = {
-    mixer.NotLoaded: 503,
-    mixer.NotFound: 404,
-    mixer.Rejected: 502,
-    mixer.ReadOnly: 400,
-    mixer.InvalidValue: 400,
-    mixer.NotToggleable: 400,
-}
-
 
 @app.errorhandler(mixer.MixerError)
 async def handle_mixer_error(error: mixer.MixerError) -> tuple[dict, int]:
@@ -191,9 +185,6 @@ async def _body() -> dict:
     if "value" not in body:
         raise BadRequest("Missing field 'value'")
     return body
-
-
-MIX_ROUTE = "/api/v1/motu/mix/<path:path>"
 
 
 @app.route(MIX_ROUTE, methods=["GET"])

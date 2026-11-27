@@ -18,6 +18,18 @@ from typing import Any, Protocol
 # A read-only empty mapping, safe to share as a default.
 EMPTY: Mapping[str, Any] = MappingProxyType({})
 
+# The MOTU's level resolution: it stores anything below 5e-7 as 0.
+LEVEL_DECIMALS = 6
+
+# Datastore path -> mix/ctrls key, first match wins. Sends and pans towards
+# another bus share the matrix fader and pan specs.
+CTRL_RULES = (
+    (re.compile(r"^mix/talkback/(\w+)$"), r"talkback/\1"),
+    (re.compile(r"^mix/\w+/\d+/matrix/\w+/\d+/send$"), "matrix/fader"),
+    (re.compile(r"^mix/\w+/\d+/matrix/\w+/\d+/pan$"), "matrix/pan"),
+    (re.compile(r"^mix/\w+/\d+/(.+)$"), r"\1"),
+)
+
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
@@ -54,9 +66,6 @@ class Rejected(MixerError):
 # ---------------------------------------------------------------------------
 # Levels
 # ---------------------------------------------------------------------------
-
-# The MOTU's level resolution: it stores anything below 5e-7 as 0.
-LEVEL_DECIMALS = 6
 
 
 def gain_to_db(gain: int | float) -> float:
@@ -134,6 +143,9 @@ class LinearScale:
         return gain
 
 
+LINEAR = LinearScale()
+
+
 @dataclass(frozen=True, slots=True)
 class DecibelScale:
     """The number is in dB; -inf is silence."""
@@ -145,6 +157,12 @@ class DecibelScale:
     def from_gain(self, gain: float) -> float:
         """Gain -> dB; silence is -inf."""
         return gain_to_db(gain)
+
+
+DB = DecibelScale()
+# Built-in level scales, read-only as all level codecs share them; the first is
+# the default.
+LEVEL_SCALES: Mapping[str, LevelScale] = MappingProxyType({"linear": LINEAR, "db": DB})
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,13 +178,6 @@ class TaperedScale:
     def from_gain(self, gain: float) -> float:
         """Gain -> taper position, via dB."""
         return self.taper.from_db(gain_to_db(gain))
-
-
-LINEAR = LinearScale()
-DB = DecibelScale()
-# Built-in level scales, read-only as all level codecs share them; the first is
-# the default.
-LEVEL_SCALES: Mapping[str, LevelScale] = MappingProxyType({"linear": LINEAR, "db": DB})
 
 
 class Codec(Protocol):
@@ -259,26 +270,23 @@ def parse_spec(spec: str, scales: Mapping[str, LevelScale] = LEVEL_SCALES) -> Co
 # Registry
 # ---------------------------------------------------------------------------
 
-# Datastore path -> mix/ctrls key, first match wins. Sends and pans towards
-# another bus share the matrix fader and pan specs.
-CTRL_RULES = (
-    (re.compile(r"^mix/talkback/(\w+)$"), r"talkback/\1"),
-    (re.compile(r"^mix/\w+/\d+/matrix/\w+/\d+/send$"), "matrix/fader"),
-    (re.compile(r"^mix/\w+/\d+/matrix/\w+/\d+/pan$"), "matrix/pan"),
-    (re.compile(r"^mix/\w+/\d+/(.+)$"), r"\1"),
-)
-
 
 class Store(Protocol):
-    """The datastore operations Controls and MixerService need (motu.DataStore)."""
+    """Datastore operations used by the mixer and panel feedback (motu.DataStore)."""
 
     data: dict
 
     def get(self, path: str) -> Any | None: ...
 
-    async def set(self, path: str, value: Any) -> Any | None: ...
+    async def set(
+        self, path: str, value: Any, *, origin: str | None = None
+    ) -> Any | None:
+        """Write value; None when the MOTU does not accept it.
 
-    async def toggle(self, path: str) -> float | None: ...
+        origin optionally identifies what triggered the change, so receivers
+        can skip echoing it back.
+        """
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,22 +391,32 @@ class MixerService:
         value: object,
         scale: str | None = None,
         response_scale: str | None = None,
+        *,
+        origin: str | None = None,
     ) -> Reading:
-        """scale is that of value; the response uses response_scale, else scale."""
+        """scale is that of value; the response uses response_scale, else scale.
+
+        origin is passed to the store, for echo suppression.
+        """
         control = self._control(path)
         codec = self._codec(control)
         scale = self._scale(control, scale)
         response_scale = (
             scale if response_scale is None else self._scale(control, response_scale)
         )
-        if await self._store.set(path, codec.encode(value, scale)) is None:
-            raise Rejected(f"MOTU did not accept the change to {path}")
+        await self._set(path, codec.encode(value, scale), origin)
         return self._reading(control, response_scale)
 
-    async def toggle(self, path: str) -> Reading:
+    async def toggle(self, path: str, *, origin: str | None = None) -> Reading:
+        """Flip an on/off control. origin is passed to the store."""
         control = self._control(path)
-        if not isinstance(self._codec(control), BoolCodec):
+        codec = self._codec(control)
+        if not isinstance(codec, BoolCodec):
             raise NotToggleable(f"{path} is not an on/off control")
-        if await self._store.toggle(path) is None:
-            raise Rejected(f"MOTU did not accept the change to {path}")
+        current = codec.decode(self._store.get(path), None).value
+        await self._set(path, codec.encode(not current, None), origin)
         return self._reading(control, None)
+
+    async def _set(self, path: str, value: float, origin: str | None) -> None:
+        if await self._store.set(path, value, origin=origin) is None:
+            raise Rejected(f"MOTU did not accept the change to {path}")

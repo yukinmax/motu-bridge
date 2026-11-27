@@ -10,6 +10,8 @@ from typing import Any
 
 import aiohttp
 
+from feeds import FEED_DATASTORE, FEED_METERS, ChangeHandler
+
 logger = logging.getLogger(__name__)
 
 # Meter samples are kept in a ring buffer of this many slots, and
@@ -174,11 +176,13 @@ class _Endpoint:
         self.refresh_timeout = refresh_timeout
         self.refresh_retries = refresh_retries
         self.base_path = ""
+        # Names this endpoint's changes in on_change(feed=...).
+        self.feed = ""
         self.refresh_params: dict | None = None
         self.etag: str | None = None
         self.client_id: int | None = None
         self.data: dict = {}
-        self._change_controller = None
+        self._change_handler: ChangeHandler | None = None
         self._stopped = False
 
     @property
@@ -231,10 +235,8 @@ class _Endpoint:
         if data_diff:
             self.data.update(data_diff)
             logger.debug("Modified: %s -> %s", self.base_path, data_diff)
-            if self._change_controller and handle_changes:
-                await self._change_controller.on_change(
-                    data_diff, source=self.base_path
-                )
+            if self._change_handler and handle_changes:
+                await self._change_handler.on_change(data_diff, feed=self.feed)
             return data_diff
         return None
 
@@ -268,9 +270,8 @@ class _Endpoint:
             self.port,
         )
 
-    def set_change_controller(self, controller: Any) -> None:
-        """Attach controller implementing on_change(data, *, source, origin=None)."""
-        self._change_controller = controller
+    def set_change_handler(self, handler: ChangeHandler) -> None:
+        self._change_handler = handler
 
 
 class DataStore(_Endpoint):
@@ -295,6 +296,7 @@ class DataStore(_Endpoint):
         self.mutate_timeout = mutate_timeout
         self.mutate_retries = mutate_retries
         self.base_path = "datastore"
+        self.feed = FEED_DATASTORE
         self.client_id = generate_client_id()
 
     async def set(
@@ -310,23 +312,17 @@ class DataStore(_Endpoint):
             attempt_timeout=self.mutate_timeout,
         )
         # 204 has no body, so the sent value is the result. 200 is accepted
-        # the same way: request() only returns for 200/204.
+        # the same way. request() also returns 304, which a write never expects.
         if response is None or response.status_code not in (200, 204):
             return None
         data_diff = {path: value}
         self.data.update(data_diff)
         logger.debug("Modified: %s -> %s", self.base_path, data_diff)
-        if self._change_controller:
-            await self._change_controller.on_change(
-                data_diff, source=self.base_path, origin=origin
+        if self._change_handler:
+            await self._change_handler.on_change(
+                data_diff, feed=self.feed, origin=origin
             )
         return value
-
-    async def toggle(self, path: str) -> float | None:
-        current = self.get(path)
-        if current is None:
-            return None
-        return await self.set(path, float(not current))
 
 
 class Meters(_Endpoint):
@@ -347,6 +343,7 @@ class Meters(_Endpoint):
             refresh_retries=refresh_retries,
         )
         self.base_path = "meters"
+        self.feed = FEED_METERS
         self.refresh_params = {"meters": "mix/level"}
         self.client_id = generate_client_id()
         self.current_index: int | None = None
@@ -403,9 +400,7 @@ class Meters(_Endpoint):
         if data_diff:
             self._set_current_index(data_diff)
             data_diff.update(self._update_peaks())
-            if self._change_controller and handle_changes:
-                await self._change_controller.on_change(
-                    data_diff, source=self.base_path
-                )
+            if self._change_handler and handle_changes:
+                await self._change_handler.on_change(data_diff, feed=self.feed)
             return data_diff
         return None

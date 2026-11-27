@@ -6,7 +6,9 @@ import pytest
 from pytest import param
 
 import binding
+import mixer
 import motu
+from feeds import FEED_METERS
 
 SEND = "mix/chan/0/matrix/aux/0/send"
 MUTE = "mix/chan/0/matrix/mute"
@@ -159,9 +161,20 @@ CONTROLS = {
 }
 
 
-def _panel_controller(feedback: dict) -> binding.PanelController:
+def _panel_controller(
+    feedback: dict, *, panel, datastore, http, meters_data: dict | None = None
+) -> binding.PanelController:
+    """A PanelController with the default tapers and meters over http, loaded
+    with meters_data."""
+    meters = motu.Meters(
+        http, host="motu", port=80, refresh_timeout=None, refresh_retries=None
+    )
+    meters.data = dict(meters_data or {})
     return binding.PanelController(
         binding.FeedbackMap.from_raw(feedback),
+        panel=panel,
+        datastore=datastore,
+        meters=meters,
         fader_taper=binding.FADER_TAPER,
         meter_taper=binding.METER_TAPER,
     )
@@ -181,15 +194,10 @@ def controller(store, http, panel) -> binding.MotuController:
         mutate_retries=None,
     )
     ds.data = store.data
-    feedback = _panel_controller(FEEDBACK)
-    feedback.set_panel(panel)
-    feedback.set_datastore(ds)
-    ds.set_change_controller(feedback)
-    controller = binding.MotuController(
-        binding.ControlMap.from_raw(CONTROLS), fader_taper=binding.FADER_TAPER
-    )
-    controller.set_datastore(ds)
-    return controller
+    feedback = _panel_controller(FEEDBACK, panel=panel, datastore=ds, http=http)
+    ds.set_change_handler(feedback)
+    service = mixer.MixerService(ds, scales=binding.SCALES)
+    return binding.MotuController(binding.ControlMap.from_raw(CONTROLS), service)
 
 
 def _feedback(sent: list) -> list[tuple[int, str, object]]:
@@ -224,7 +232,7 @@ def _feedback(sent: list) -> list[tuple[int, str, object]]:
             {},
             [(FADER, "600")],
             # 600 is -30 + 42 * 475 / 875 = -7.2 dB.
-            {SEND: pytest.approx(10 ** (-7.2 / 20))},
+            {SEND: round(10 ** (-7.2 / 20), 6)},
             [(DISPLAY, "text", " -7.2")],
             id="fader-move-suppresses-its-echo",
         ),
@@ -340,6 +348,44 @@ async def test_motu_controller_feedback(
 
 
 @pytest.mark.parametrize(
+    ("hwcid", "value", "warning"),
+    [
+        param(FADER, "600", "Unable to set path", id="fader"),
+        param(MUTE_BUTTON, "Down", "Unable to toggle path", id="toggle"),
+        param(OVERRIDE_BUTTON, "Down", "Unable to set path", id="override"),
+    ],
+)
+async def test_motu_controller_logs_rejected_writes(
+    controller, http, panel, store, caplog, hwcid, value, warning
+):
+    """A write the MOTU rejects is logged; the store and panel are unchanged."""
+    before = dict(store.data)
+    http.responses = [None]
+    await controller.process_hwc(str(hwcid), value)
+    assert warning in caplog.text
+    assert store.data == before
+    assert panel.sent == []
+
+
+@pytest.mark.parametrize(
+    ("hwcid", "value", "warning"),
+    [
+        param(DOWN, "Down", "Unable to read path", id="down-read"),
+        param(FADER, "600", "Unable to set path", id="fader-write"),
+    ],
+)
+async def test_motu_controller_logs_unknown_paths(
+    controller, panel, store, caplog, hwcid, value, warning
+):
+    """A mapped path the MOTU doesn't have is logged and nothing is written."""
+    del store.data[SEND]
+    await controller.process_hwc(str(hwcid), value)
+    assert warning in caplog.text
+    assert SEND not in store.data
+    assert panel.sent == []
+
+
+@pytest.mark.parametrize(
     ("pre_fader", "initial", "meter"),
     [
         param(
@@ -363,7 +409,7 @@ async def test_motu_controller_feedback(
         param(False, {MUTE: 1.0}, {}, id="post-fader-muted"),
     ],
 )
-async def test_panel_controller_meters(store, panel, pre_fader, initial, meter):
+async def test_panel_controller_meters(store, panel, http, pre_fader, initial, meter):
     """One meters update at 0 dB on channel 0. A post-fader meter is scaled by
     the fader gain and drops to silence when muted."""
     store.data.update(initial)
@@ -380,16 +426,59 @@ async def test_panel_controller_meters(store, panel, pre_fader, initial, meter):
                     "audio_meter": {"mono": True},
                 }
             }
-        }
+        },
+        panel=panel,
+        datastore=store,
+        http=http,
     )
-    feedback.set_panel(panel)
-    feedback.set_datastore(store)
     # A full-scale sample on channel 0 is 0 dB.
     await feedback.on_change(
         {"mix/level/0": [motu.METER_SCALE], "mix/level/peaks": [motu.METER_SCALE]},
-        source=binding.SOURCE_METERS,
+        feed=FEED_METERS,
     )
     assert panel.sent == [
         panel.cmd_wakeup(),
         panel.hwc_meter(METER, mono=True, **meter),
     ]
+
+
+async def test_panel_controller_init_feedback(store, panel, http, caplog):
+    """init_feedback sends every mapped datastore value with its full style,
+    then a meter frame even though nothing changed. A path the datastore lacks
+    is logged once."""
+    missing = "mix/chan/9/matrix/mute"
+    feedback = _panel_controller(
+        {
+            **FEEDBACK,
+            missing: {"button": {"hwcid": 99, "mode": {"state": (4, 0)}}},
+            "mix/level": {
+                "display1": {
+                    "hwcid": METER,
+                    "channels": [0],
+                    "audio_meter": {"mono": True},
+                }
+            },
+        },
+        panel=panel,
+        datastore=store,
+        http=http,
+        # Every slot and the peaks hold a full-scale sample on channel 0.
+        meters_data={
+            f"mix/level/{slot}": [motu.METER_SCALE]
+            for slot in [*map(str, range(motu.METER_SLOTS)), "peaks"]
+        },
+    )
+    await feedback.init_feedback()
+    assert _feedback(panel.sent) == [
+        (FADER, "fader", FADER_UNITY),
+        (FADER, "mode", 4),
+        (DISPLAY, "text", "  0.0"),
+        (MUTE_BUTTON, "mode", 0),
+        (OVERRIDE_BUTTON, "mode", 4),
+    ]
+    assert panel.sent[-2:] == [
+        panel.cmd_wakeup(),
+        panel.hwc_meter(METER, mono=True, data1=METER_UNITY, peak1=METER_UNITY),
+    ]
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [f"Path {missing} is not available"]
