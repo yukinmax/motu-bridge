@@ -26,6 +26,7 @@ NO_SCALE = "has no 'scale' option"
 SCALES = "'scale' must be one of: linear, db, fader"
 NOT_ON_OFF = "is not an on/off control"
 NOT_LOADED = "MOTU data has not been loaded yet"
+NOT_A_CHOICE = "'value' must be one of: 0 (RMS), 1 (Peak)"
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,30 @@ async def test_post(client, store, url, body, response, stored):
         ),
         param(
             "PUT",
+            SEND,
+            {"value": 1, "scale": True},
+            400,
+            SCALES,
+            id="put-bool-scale",
+        ),
+        param(
+            "PUT",
+            SEND,
+            {"value": 1, "scale": []},
+            400,
+            SCALES,
+            id="put-list-scale",
+        ),
+        param(
+            "PUT",
+            SEND,
+            {"value": 1, "scale": {}},
+            400,
+            SCALES,
+            id="put-object-scale",
+        ),
+        param(
+            "PUT",
             f"{EQ_GAIN}?scale=db",
             {"value": 1},
             400,
@@ -328,6 +353,8 @@ async def test_post(client, store, url, body, response, stored):
             NOT_FINITE,
             id="float-overflow",
         ),
+        param("PUT", PEAK, {"value": []}, 400, NOT_A_CHOICE, id="choice-list"),
+        param("PUT", PEAK, {"value": {}}, 400, NOT_A_CHOICE, id="choice-object"),
         param("PUT", FORMAT, {"value": "2:0"}, 400, "is read-only", id="read-only"),
         param(
             "PUT",
