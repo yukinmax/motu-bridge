@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import struct
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 METER_SLOTS = 15
 METER_SCALE = 1000
 
+# The MOTU keeps datastore numbers as float32 and serves them rounded to this
+# many decimals, so it stores any level below 5e-7 as 0.
+DEVICE_DECIMALS = 6
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,6 +38,21 @@ def dict_diff(d_old: dict, d_new: dict) -> dict:
 
 def generate_client_id() -> int:
     return random.getrandbits(32)
+
+
+def device_value(value: Any) -> Any:
+    """value as the MOTU stores and serves it.
+
+    Floats become the nearest float32 rounded to DEVICE_DECIMALS, so a written
+    27.000161 reads back as 27.00016. Other values are returned unchanged.
+    """
+    if not isinstance(value, float):
+        return value
+    try:
+        single = struct.unpack("f", struct.pack("f", value))[0]
+    except OverflowError:
+        return value
+    return round(single, DEVICE_DECIMALS)
 
 
 @dataclass(slots=True)
@@ -302,6 +322,14 @@ class DataStore(_Endpoint):
     async def set(
         self, path: str, value: Any, *, origin: str | None = None
     ) -> Any | None:
+        """Write value to path; the stored value, or None if not accepted.
+
+        value is first normalized to what the MOTU stores (device_value), and
+        that is both sent and kept in the local copy. Our own writes are left
+        out of the long poll, so the local copy then matches the device. origin
+        is passed on to the change handler for echo suppression.
+        """
+        value = device_value(value)
         data = f"json={json.dumps({path: value})}".encode()
         response = await self.http.request(
             self._url(),

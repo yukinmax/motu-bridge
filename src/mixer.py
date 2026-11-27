@@ -15,11 +15,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Protocol
 
+from motu import DEVICE_DECIMALS
+
 # A read-only empty mapping, safe to share as a default.
 EMPTY: Mapping[str, Any] = MappingProxyType({})
-
-# The MOTU's level resolution: it stores anything below 5e-7 as 0.
-LEVEL_DECIMALS = 6
 
 # Datastore path -> mix/ctrls key, first match wins. Sends and pans towards
 # another bus share the matrix fader and pan specs.
@@ -246,7 +245,7 @@ class LevelCodec:
 
     def encode(self, value: object, scale: str | None) -> float:
         gain = self.scales[scale].to_gain(value)
-        return round(min(max(gain, self.minimum), self.maximum), LEVEL_DECIMALS)
+        return round(min(max(gain, self.minimum), self.maximum), DEVICE_DECIMALS)
 
 
 def parse_spec(spec: str, scales: Mapping[str, LevelScale] = LEVEL_SCALES) -> Codec:

@@ -249,6 +249,8 @@ The `scale` field in a `PUT` body sets the scale of `value`. The optional `scale
 
 Level responses include the `scale` of `value`. Numeric control responses include the control's `unit`, such as `Hz` or `ms`, or `null` when it has none. On/off and choice controls return only `value`.
 
+A `PUT` response carries the value as the MOTU stores it, in single precision rounded to six decimal places, so it matches what a later `GET` returns: `27.000161` is stored as `27.00016`.
+
 When setting a level, the value is limited to the control's maximum, which is 4.0 linear (about +12 dB) for faders and sends, and rounded to the MOTU's resolution of six decimal places, so the lowest level above silence is -120 dB. A level of 0 is silence, which is minus infinity in dB. JSON has no infinity, so on the `db` scale silence is `null`, both in responses and when setting a level. On the `fader` scale silence is `0`.
 
 Errors are returned as JSON of the form `{"error": "description"}` with one of these status codes:

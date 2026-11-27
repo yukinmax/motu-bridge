@@ -303,7 +303,7 @@ class MotuController:
         # Rounded like the MOTU stores it, so it compares equal after a poll.
         default = round(
             mixer.db_to_gain(min(cfg.default_level_db, MAX_DB)),
-            mixer.LEVEL_DECIMALS,
+            motu.DEVICE_DECIMALS,
         )
         return default if current != default else 1.0
 

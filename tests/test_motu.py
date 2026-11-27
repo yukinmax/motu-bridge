@@ -8,6 +8,7 @@ from pytest import param
 import motu
 
 MUTE = "mix/chan/0/matrix/mute"
+GAIN = "mix/chan/0/eq/mid1/gain"
 NOT_MODIFIED = motu._HttpResult(304, "Not Modified")
 
 
@@ -116,6 +117,33 @@ async def test_datastore_set_patches_and_notifies(datastore, http, recorder):
     ]
     assert datastore.data == {MUTE: 1.0}
     assert recorder.changes == [({MUTE: 1.0}, "datastore", "7")]
+
+
+@pytest.mark.parametrize(
+    ("value", "stored"),
+    [
+        param(0.1, 0.1, id="float32-rounds-back"),
+        param(27.000161, 27.00016, id="float32-step"),
+        param(0.562341, 0.562341, id="level"),
+        param(3.981072, 3.981072, id="level-max"),
+        param(4e-7, 0.0, id="below-resolution"),
+        param(-1, -1, id="int-unchanged"),
+        param(True, True, id="bool-unchanged"),
+        param("1:0", "1:0", id="string-unchanged"),
+        param(1e39, 1e39, id="beyond-float32"),
+    ],
+)
+def test_device_value(value, stored):
+    assert motu.device_value(value) == stored
+    assert type(motu.device_value(value)) is type(stored)
+
+
+async def test_datastore_set_stores_the_device_value(datastore, http, recorder):
+    """The write, the local copy and the change carry what the MOTU stores."""
+    assert await datastore.set(GAIN, 27.000161, origin="7") == 27.00016
+    assert http.requests[0]["data"] == b'json={"mix/chan/0/eq/mid1/gain": 27.00016}'
+    assert datastore.data == {GAIN: 27.00016}
+    assert recorder.changes == [({GAIN: 27.00016}, "datastore", "7")]
 
 
 async def test_datastore_set_rejected(datastore, http, recorder):

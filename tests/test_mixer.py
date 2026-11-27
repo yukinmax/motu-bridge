@@ -9,6 +9,7 @@ from pytest import param
 
 import binding
 import mixer
+from motu import DEVICE_DECIMALS
 
 # FADER_TAPER puts silence at 0, -30 dB at 125, 0 dB at 750 and +12 dB at 1000.
 FADER = mixer.TaperedScale(binding.FADER_TAPER)
@@ -16,8 +17,8 @@ FADER = mixer.TaperedScale(binding.FADER_TAPER)
 SEND = mixer.LevelCodec(0.0, 4.0, {**mixer.LEVEL_SCALES, **binding.SCALES})
 PEAK = mixer.EnumCodec({0: "RMS", 1: "Peak"})
 EQ_GAIN = mixer.NumberCodec(-20.0, 20.0, "dB")
-PLUS_12_DB = round(10**0.6, mixer.LEVEL_DECIMALS)
-MINUS_10_DB = round(10**-0.5, mixer.LEVEL_DECIMALS)
+PLUS_12_DB = round(10**0.6, DEVICE_DECIMALS)
+MINUS_10_DB = round(10**-0.5, DEVICE_DECIMALS)
 
 MUTE_PATH = "mix/chan/0/matrix/mute"
 SEND_PATH = "mix/chan/0/matrix/aux/0/send"
