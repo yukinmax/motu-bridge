@@ -48,7 +48,6 @@ class RawPanel:
         *,
         host: str,
         port: int,
-        mode: str = "ASCII",
         delay: float,
         idle_sleep: float,
         sleep_timeout: int,
@@ -62,7 +61,6 @@ class RawPanel:
         send_timeout: float | None,
         wakeup_min_interval: float,
     ) -> None:
-        self.mode = mode
         self.host = str(host)
         self.port = int(port)
         self.connected = False

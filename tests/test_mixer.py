@@ -12,7 +12,8 @@ import mixer
 
 # FADER_TAPER puts silence at 0, -30 dB at 125, 0 dB at 750 and +12 dB at 1000.
 FADER = mixer.TaperedScale(binding.FADER_TAPER)
-SEND = mixer.LevelCodec(0.0, 4.0, {**mixer.LEVEL_SCALES, "fader": FADER})
+# A send's codec as api.py's service builds it, with the panel's scales.
+SEND = mixer.LevelCodec(0.0, 4.0, {**mixer.LEVEL_SCALES, **binding.SCALES})
 PEAK = mixer.EnumCodec({0: "RMS", 1: "Peak"})
 EQ_GAIN = mixer.NumberCodec(-20.0, 20.0, "dB")
 PLUS_12_DB = round(10**0.6, mixer.LEVEL_DECIMALS)
@@ -311,7 +312,7 @@ GATE = mixer.LevelCodec(0.0, 1.0, SEND.scales)
 def test_controls_get(store, path, codec):
     """Controls as api.py builds them, with the panel's fader scale. A codec of
     None is a read-only control."""
-    control = mixer.Controls(store, scales={"fader": FADER}).get(path)
+    control = mixer.Controls(store, scales=binding.SCALES).get(path)
     assert control == mixer.Control(path, codec)
 
 
@@ -345,7 +346,7 @@ def test_controls_get_caches_codecs_and_follows_the_store(store):
 
 @pytest.fixture
 def service(store):
-    return mixer.MixerService(store, scales={"fader": FADER})
+    return mixer.MixerService(store, scales=binding.SCALES)
 
 
 async def _call(service, operation: str, *args):

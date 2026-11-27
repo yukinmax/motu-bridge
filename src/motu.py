@@ -10,7 +10,7 @@ from typing import Any
 
 import aiohttp
 
-from feeds import ChangeHandler
+from feeds import FEED_DATASTORE, FEED_METERS, ChangeHandler
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +176,8 @@ class _Endpoint:
         self.refresh_timeout = refresh_timeout
         self.refresh_retries = refresh_retries
         self.base_path = ""
+        # Names this endpoint's changes in on_change(feed=...).
+        self.feed = ""
         self.refresh_params: dict | None = None
         self.etag: str | None = None
         self.client_id: int | None = None
@@ -234,7 +236,7 @@ class _Endpoint:
             self.data.update(data_diff)
             logger.debug("Modified: %s -> %s", self.base_path, data_diff)
             if self._change_handler and handle_changes:
-                await self._change_handler.on_change(data_diff, feed=self.base_path)
+                await self._change_handler.on_change(data_diff, feed=self.feed)
             return data_diff
         return None
 
@@ -294,6 +296,7 @@ class DataStore(_Endpoint):
         self.mutate_timeout = mutate_timeout
         self.mutate_retries = mutate_retries
         self.base_path = "datastore"
+        self.feed = FEED_DATASTORE
         self.client_id = generate_client_id()
 
     async def set(
@@ -309,7 +312,7 @@ class DataStore(_Endpoint):
             attempt_timeout=self.mutate_timeout,
         )
         # 204 has no body, so the sent value is the result. 200 is accepted
-        # the same way: request() only returns for 200/204.
+        # the same way. request() also returns 304, which a write never expects.
         if response is None or response.status_code not in (200, 204):
             return None
         data_diff = {path: value}
@@ -317,7 +320,7 @@ class DataStore(_Endpoint):
         logger.debug("Modified: %s -> %s", self.base_path, data_diff)
         if self._change_handler:
             await self._change_handler.on_change(
-                data_diff, feed=self.base_path, origin=origin
+                data_diff, feed=self.feed, origin=origin
             )
         return value
 
@@ -340,6 +343,7 @@ class Meters(_Endpoint):
             refresh_retries=refresh_retries,
         )
         self.base_path = "meters"
+        self.feed = FEED_METERS
         self.refresh_params = {"meters": "mix/level"}
         self.client_id = generate_client_id()
         self.current_index: int | None = None
@@ -397,6 +401,6 @@ class Meters(_Endpoint):
             self._set_current_index(data_diff)
             data_diff.update(self._update_peaks())
             if self._change_handler and handle_changes:
-                await self._change_handler.on_change(data_diff, feed=self.base_path)
+                await self._change_handler.on_change(data_diff, feed=self.feed)
             return data_diff
         return None

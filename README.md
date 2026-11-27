@@ -29,7 +29,7 @@ It is an asyncio service built on [Quart](https://quart.palletsprojects.com/), s
 
 ```mermaid
 flowchart LR
-    Panel["SKAARHOJ RAW panel"] <-->|"TCP, JSON lines"| RP["RawPanel (raw_panel.py)"]
+    Panel["SKAARHOJ RAW panel"] <-->|"TCP, JSON to panel, ASCII from panel"| RP["RawPanel (raw_panel.py)"]
     RP -->|"hardware changes"| MC["MotuController (binding.py)"]
     MC --> MS["MixerService (mixer.py)"]
     MS -->|"PATCH datastore"| DS["DataStore + Meters (motu.py)"]

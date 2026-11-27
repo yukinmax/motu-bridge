@@ -272,7 +272,7 @@ def parse_spec(spec: str, scales: Mapping[str, LevelScale] = LEVEL_SCALES) -> Co
 
 
 class Store(Protocol):
-    """The datastore operations Controls and MixerService need (motu.DataStore)."""
+    """Datastore operations used by the mixer and panel feedback (motu.DataStore)."""
 
     data: dict
 

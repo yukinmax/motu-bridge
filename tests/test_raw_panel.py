@@ -215,7 +215,7 @@ async def test_handle_request_wake_inits_feedback(panel, recorder, monkeypatch):
 
 async def test_process_buffers_sends_the_latest_change(panel, recorder):
     """Two moves of one control before the buffer runs reach the change
-    controller as one change with the latest value, after a wakeup."""
+    handler as one change with the latest value, after a wakeup."""
     panel.set_change_handler(recorder)
     await panel.handle_request("HWC#13=Abs:500")
     await panel.handle_request("HWC#13=Abs:600")

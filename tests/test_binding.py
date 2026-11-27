@@ -162,12 +162,14 @@ CONTROLS = {
 
 
 def _panel_controller(
-    feedback: dict, *, panel, datastore, http
+    feedback: dict, *, panel, datastore, http, meters_data: dict | None = None
 ) -> binding.PanelController:
-    """A PanelController with the default tapers and meters over http."""
+    """A PanelController with the default tapers and meters over http, loaded
+    with meters_data."""
     meters = motu.Meters(
         http, host="motu", port=80, refresh_timeout=None, refresh_retries=None
     )
+    meters.data = dict(meters_data or {})
     return binding.PanelController(
         binding.FeedbackMap.from_raw(feedback),
         panel=panel,
@@ -438,3 +440,45 @@ async def test_panel_controller_meters(store, panel, http, pre_fader, initial, m
         panel.cmd_wakeup(),
         panel.hwc_meter(METER, mono=True, **meter),
     ]
+
+
+async def test_panel_controller_init_feedback(store, panel, http, caplog):
+    """init_feedback sends every mapped datastore value with its full style,
+    then a meter frame even though nothing changed. A path the datastore lacks
+    is logged once."""
+    missing = "mix/chan/9/matrix/mute"
+    feedback = _panel_controller(
+        {
+            **FEEDBACK,
+            missing: {"button": {"hwcid": 99, "mode": {"state": (4, 0)}}},
+            "mix/level": {
+                "display1": {
+                    "hwcid": METER,
+                    "channels": [0],
+                    "audio_meter": {"mono": True},
+                }
+            },
+        },
+        panel=panel,
+        datastore=store,
+        http=http,
+        # Every slot and the peaks hold a full-scale sample on channel 0.
+        meters_data={
+            f"mix/level/{slot}": [motu.METER_SCALE]
+            for slot in [*map(str, range(motu.METER_SLOTS)), "peaks"]
+        },
+    )
+    await feedback.init_feedback()
+    assert _feedback(panel.sent) == [
+        (FADER, "fader", FADER_UNITY),
+        (FADER, "mode", 4),
+        (DISPLAY, "text", "  0.0"),
+        (MUTE_BUTTON, "mode", 0),
+        (OVERRIDE_BUTTON, "mode", 4),
+    ]
+    assert panel.sent[-2:] == [
+        panel.cmd_wakeup(),
+        panel.hwc_meter(METER, mono=True, data1=METER_UNITY, peak1=METER_UNITY),
+    ]
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [f"Path {missing} is not available"]

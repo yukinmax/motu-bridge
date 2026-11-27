@@ -36,7 +36,7 @@ OVERRIDE_DISABLED = -1.0
 MIN_DB = -120
 MAX_DB = 12
 
-# Panel raw ↔ Motu dB.
+# Panel raw ↔ MOTU dB.
 FADERS_RANGE_MAPPING = (
     (0, -math.inf),
     ((1, 5), (MIN_DB, -60)),
@@ -102,7 +102,7 @@ SCALES: Mapping[str, mixer.LevelScale] = MappingProxyType(
 
 
 def role_from_path(path: str) -> str:
-    """Infer control role from the last Motu path segment."""
+    """Infer control role from the last MOTU path segment."""
     m = _PATH_ROLE_RE.search(path)
     if not m:
         return "unknown"
@@ -128,7 +128,7 @@ def kind_from_name(name: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class BindingConfig:
-    """Resolved HWC → Motu binding. Optional fields are role-specific."""
+    """Resolved HWC → MOTU binding. Optional fields are role-specific."""
 
     path: str
     role: str
@@ -201,7 +201,7 @@ class ControlMap(_Map):
 
 
 class FeedbackMap(_Map):
-    """Motu path → tuple of feedback targets."""
+    """MOTU path → tuple of feedback targets."""
 
     @classmethod
     def from_raw(cls, raw: Mapping[str, Mapping[str, Any]]) -> FeedbackMap:
@@ -353,12 +353,9 @@ class MotuController:
 
 
 class PanelController:
-    """Motu → panel feedback.
+    """MOTU → panel feedback.
 
     Reads the datastore and meters, and sends feedback to the panel.
-
-    Public: on_change, init_feedback
-    Private: _process_data_feedback, _process_meters_feedback
     """
 
     def __init__(
@@ -413,22 +410,25 @@ class PanelController:
             logger.debug("PanelController: ignore feed=%s", feed)
 
     async def init_feedback(self) -> None:
-        """Seed panel from current Motu snapshots."""
+        """Seed panel from current MOTU snapshots."""
         logger.info("Initializing the panel feedback")
         dd = {}
         md = {}
-        for path in self._map:
-            v = self._ds.get(path)
-            if v is None:
+        for path, targets in self._map.items():
+            if any(target.kind == "meter" for target in targets):
                 for i in [str(s) for s in range(motu.METER_SLOTS)] + ["peaks"]:
                     m_path = f"{path}/{i}"
                     v = self._ms.get(m_path)
                     if v is None:
-                        logger.warning("Path %s is not available", path)
+                        logger.warning("Path %s is not available", m_path)
                         continue
                     md[m_path] = v
-            else:
-                dd[path] = v
+                continue
+            v = self._ds.get(path)
+            if v is None:
+                logger.warning("Path %s is not available", path)
+                continue
+            dd[path] = v
         logger.debug("Init datastore feedback %s", dd)
         await self._process_data_feedback(dd, init=True)
         logger.debug("Init meters feedback %s", md)
