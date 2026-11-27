@@ -283,7 +283,8 @@ class Store(Protocol):
     ) -> Any | None:
         """Write value; None when the MOTU does not accept it.
 
-        origin names the client that made the change, for echo suppression.
+        origin optionally identifies what triggered the change, so receivers
+        can skip echoing it back.
         """
         ...
 

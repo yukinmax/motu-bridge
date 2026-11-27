@@ -206,7 +206,7 @@ async def test_handle_request_ignores(panel, request_line):
 
 async def test_handle_request_wake_inits_feedback(panel, recorder, monkeypatch):
     monkeypatch.setattr(raw_panel, "_WAKE_FEEDBACK_DELAY", 0)
-    panel.set_feedback_controller(recorder)
+    panel.set_feedback_handler(recorder)
     await panel.handle_request("_isSleeping=1")
     assert (panel.info["isSleeping"], recorder.inits) == (True, 0)
     await panel.handle_request("_isSleeping=0")
@@ -216,7 +216,7 @@ async def test_handle_request_wake_inits_feedback(panel, recorder, monkeypatch):
 async def test_process_buffers_sends_the_latest_change(panel, recorder):
     """Two moves of one control before the buffer runs reach the change
     controller as one change with the latest value, after a wakeup."""
-    panel.set_change_controller(recorder)
+    panel.set_change_handler(recorder)
     await panel.handle_request("HWC#13=Abs:500")
     await panel.handle_request("HWC#13=Abs:600")
     task = asyncio.create_task(panel.process_buffers())
@@ -233,7 +233,7 @@ async def test_process_buffers_sends_the_latest_change(panel, recorder):
 @pytest.mark.parametrize("panel", [{"delay": 0.2}], indirect=True, ids=["delay"])
 async def test_process_buffers_waits_for_the_delay(panel, recorder):
     """A change stays in the buffer for `delay` seconds before it is sent."""
-    panel.set_change_controller(recorder)
+    panel.set_change_handler(recorder)
     await panel.handle_request("HWC#13=Abs:600")
     task = asyncio.create_task(panel.process_buffers())
     try:

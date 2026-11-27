@@ -355,7 +355,9 @@ class MotuController:
 class PanelController:
     """Motu → panel feedback.
 
-    Public: on_change, init_feedback, set_panel, set_datastore, set_meters
+    Reads the datastore and meters, and sends feedback to the panel.
+
+    Public: on_change, init_feedback
     Private: _process_data_feedback, _process_meters_feedback
     """
 
@@ -363,15 +365,18 @@ class PanelController:
         self,
         feedback_map: FeedbackMap,
         *,
+        panel: raw_panel.RawPanel,
+        datastore: mixer.Store,
+        meters: motu.Meters,
         fader_taper: mixer.DbTaper,
         meter_taper: mixer.DbTaper,
     ) -> None:
         self._map = feedback_map
+        self._panel = panel
+        self._ds = datastore
+        self._ms = meters
         self._fader_scale = mixer.TaperedScale(fader_taper)
         self._meter_scale = mixer.TaperedScale(meter_taper)
-        self._panel = None
-        self._ds = None
-        self._ms = None
         self._meter_multipliers: dict[int, float] = {}
         self._silent_meters: set[int] = set()
         self._last_peaks = None
@@ -380,15 +385,6 @@ class PanelController:
             "fader": self._handle_fader,
             "display": self._handle_display,
         }
-
-    def set_panel(self, panel: raw_panel.RawPanel) -> None:
-        self._panel = panel
-
-    def set_datastore(self, datastore: motu.DataStore) -> None:
-        self._ds = datastore
-
-    def set_meters(self, meters: motu.Meters) -> None:
-        self._ms = meters
 
     @property
     def _meter_targets(self) -> tuple[FeedbackTarget, ...]:
@@ -409,9 +405,6 @@ class PanelController:
     async def on_change(
         self, data: dict, *, feed: str, origin: str | None = None
     ) -> None:
-        if self._panel is None:
-            logger.debug("PanelController: no panel; ignore feed=%s", feed)
-            return
         if feed == FEED_DATASTORE:
             await self._process_data_feedback(data, origin=origin)
         elif feed == FEED_METERS:
@@ -421,15 +414,6 @@ class PanelController:
 
     async def init_feedback(self) -> None:
         """Seed panel from current Motu snapshots."""
-        if self._panel is None:
-            logger.warning("PanelController.init_feedback: no panel")
-            return
-        if self._ds is None:
-            logger.warning("PanelController.init_feedback: no datastore")
-            return
-        if self._ms is None:
-            logger.warning("PanelController.init_feedback: no meters")
-            return
         logger.info("Initializing the panel feedback")
         dd = {}
         md = {}
@@ -675,7 +659,7 @@ class PanelController:
         level_samples, peak_samples = self._split_meter_payload(d)
         if level_samples is None:
             return
-        prev_levels = self._ms.previous_levels if self._ms else None
+        prev_levels = self._ms.previous_levels
         prev_peaks = self._last_peaks
         await self._panel.wakeup()
         messages = []

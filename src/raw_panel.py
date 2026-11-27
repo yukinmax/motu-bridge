@@ -6,7 +6,7 @@ import json
 import logging
 import socket
 import time
-from typing import Any
+from typing import Protocol
 
 from feeds import FEED_RAW_PANEL, ChangeHandler
 
@@ -25,6 +25,12 @@ _USER_TIMEOUT_MS = 10_000  # unacknowledged data closes the connection after thi
 
 # HWCExtended Interpretation value for fader position.
 _FADER_INTERPRETATION = 5
+
+
+class FeedbackHandler(Protocol):
+    """Re-sends all panel feedback, such as after the panel connects or wakes."""
+
+    async def init_feedback(self) -> None: ...
 
 
 def normalize_hwc_value(value: str) -> str:
@@ -116,8 +122,8 @@ class RawPanel:
         self.last_activity = 0.0
         self._last_wakeup = 0.0
         self._wakeup_min_interval = wakeup_min_interval
-        self._change_controller: ChangeHandler | None = None
-        self._feedback_controller = None
+        self._change_handler: ChangeHandler | None = None
+        self._feedback_handler: FeedbackHandler | None = None
 
     def _update_sys_stat(self, value: str) -> None:
         self._sys_stat = value
@@ -161,8 +167,8 @@ class RawPanel:
         if not new_state and (prev_state or prev_state is None):
             # Init feedback only after panel wakes up or initializes
             await asyncio.sleep(_WAKE_FEEDBACK_DELAY)
-            if self._feedback_controller is not None:
-                await self._feedback_controller.init_feedback()
+            if self._feedback_handler is not None:
+                await self._feedback_handler.init_feedback()
 
     def _update_panel_sleep_timeout(self, value: str) -> None:
         prev_state = self.info["panel_sleep_timeout"]
@@ -200,11 +206,11 @@ class RawPanel:
 
     async def _hardware_change_process(self, hwcid: str, value: str) -> None:
         await self.wakeup()
-        if self._change_controller is None:
-            logger.debug("No change controller; ignore hwcid %s", hwcid)
+        if self._change_handler is None:
+            logger.debug("No change handler; ignore hwcid %s", hwcid)
             return
         normalized = normalize_hwc_value(value)
-        await self._change_controller.on_change(
+        await self._change_handler.on_change(
             {"hwcid": str(hwcid), "value": normalized},
             feed=FEED_RAW_PANEL,
         )
@@ -244,12 +250,12 @@ class RawPanel:
         """Signal long-running loops to exit; blocks reconnect."""
         self._stopped = True
 
-    def set_change_controller(self, controller: ChangeHandler) -> None:
-        self._change_controller = controller
+    def set_change_handler(self, handler: ChangeHandler) -> None:
+        self._change_handler = handler
 
-    def set_feedback_controller(self, controller: Any) -> None:
-        """Attach controller implementing init_feedback()."""
-        self._feedback_controller = controller
+    def set_feedback_handler(self, handler: FeedbackHandler) -> None:
+        """Attach the handler that re-sends feedback after a connect or wake."""
+        self._feedback_handler = handler
 
     async def connect(
         self,

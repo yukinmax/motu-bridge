@@ -55,7 +55,7 @@ class FakeHTTP:
 
 
 class Recorder:
-    """A change and feedback controller that records its calls."""
+    """A change and feedback handler that records its calls."""
 
     def __init__(self) -> None:
         self.changes: list[tuple[dict, str, str | None]] = []

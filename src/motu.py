@@ -180,7 +180,7 @@ class _Endpoint:
         self.etag: str | None = None
         self.client_id: int | None = None
         self.data: dict = {}
-        self._change_controller: ChangeHandler | None = None
+        self._change_handler: ChangeHandler | None = None
         self._stopped = False
 
     @property
@@ -233,8 +233,8 @@ class _Endpoint:
         if data_diff:
             self.data.update(data_diff)
             logger.debug("Modified: %s -> %s", self.base_path, data_diff)
-            if self._change_controller and handle_changes:
-                await self._change_controller.on_change(data_diff, feed=self.base_path)
+            if self._change_handler and handle_changes:
+                await self._change_handler.on_change(data_diff, feed=self.base_path)
             return data_diff
         return None
 
@@ -268,8 +268,8 @@ class _Endpoint:
             self.port,
         )
 
-    def set_change_controller(self, controller: ChangeHandler) -> None:
-        self._change_controller = controller
+    def set_change_handler(self, handler: ChangeHandler) -> None:
+        self._change_handler = handler
 
 
 class DataStore(_Endpoint):
@@ -315,8 +315,8 @@ class DataStore(_Endpoint):
         data_diff = {path: value}
         self.data.update(data_diff)
         logger.debug("Modified: %s -> %s", self.base_path, data_diff)
-        if self._change_controller:
-            await self._change_controller.on_change(
+        if self._change_handler:
+            await self._change_handler.on_change(
                 data_diff, feed=self.base_path, origin=origin
             )
         return value
@@ -396,7 +396,7 @@ class Meters(_Endpoint):
         if data_diff:
             self._set_current_index(data_diff)
             data_diff.update(self._update_peaks())
-            if self._change_controller and handle_changes:
-                await self._change_controller.on_change(data_diff, feed=self.base_path)
+            if self._change_handler and handle_changes:
+                await self._change_handler.on_change(data_diff, feed=self.base_path)
             return data_diff
         return None

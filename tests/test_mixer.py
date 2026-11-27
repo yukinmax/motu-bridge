@@ -442,12 +442,18 @@ async def test_service_toggle(store, service, path, reading, stored):
     assert store.writes == [(path, stored)]
 
 
-async def test_service_forwards_origin(store, service):
+@pytest.mark.parametrize(
+    ("operation", "args", "kwargs", "origin"),
+    [
+        param("write", (SEND_PATH, 750, "fader"), {"origin": "13"}, "13", id="write"),
+        param("toggle", (MUTE_PATH,), {"origin": "1"}, "1", id="toggle"),
+        param("write", (MUTE_PATH, False), {}, None, id="write-without-origin"),
+    ],
+)
+async def test_service_forwards_origin(store, service, operation, args, kwargs, origin):
     """write and toggle pass origin to the store, for echo suppression."""
-    await service.write(SEND_PATH, 750, "fader", origin="13")
-    await service.toggle(MUTE_PATH, origin="1")
-    await service.write(MUTE_PATH, False)
-    assert store.origins == ["13", "1", None]
+    await getattr(service, operation)(*args, **kwargs)
+    assert store.origins == [origin]
 
 
 @pytest.mark.parametrize(

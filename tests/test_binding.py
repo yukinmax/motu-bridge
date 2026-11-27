@@ -161,9 +161,18 @@ CONTROLS = {
 }
 
 
-def _panel_controller(feedback: dict) -> binding.PanelController:
+def _panel_controller(
+    feedback: dict, *, panel, datastore, http
+) -> binding.PanelController:
+    """A PanelController with the default tapers and meters over http."""
+    meters = motu.Meters(
+        http, host="motu", port=80, refresh_timeout=None, refresh_retries=None
+    )
     return binding.PanelController(
         binding.FeedbackMap.from_raw(feedback),
+        panel=panel,
+        datastore=datastore,
+        meters=meters,
         fader_taper=binding.FADER_TAPER,
         meter_taper=binding.METER_TAPER,
     )
@@ -183,10 +192,8 @@ def controller(store, http, panel) -> binding.MotuController:
         mutate_retries=None,
     )
     ds.data = store.data
-    feedback = _panel_controller(FEEDBACK)
-    feedback.set_panel(panel)
-    feedback.set_datastore(ds)
-    ds.set_change_controller(feedback)
+    feedback = _panel_controller(FEEDBACK, panel=panel, datastore=ds, http=http)
+    ds.set_change_handler(feedback)
     service = mixer.MixerService(ds, scales=binding.SCALES)
     return binding.MotuController(binding.ControlMap.from_raw(CONTROLS), service)
 
@@ -358,13 +365,20 @@ async def test_motu_controller_logs_rejected_writes(
     assert panel.sent == []
 
 
-async def test_motu_controller_logs_unknown_paths(controller, panel, store, caplog):
+@pytest.mark.parametrize(
+    ("hwcid", "value", "warning"),
+    [
+        param(DOWN, "Down", "Unable to read path", id="down-read"),
+        param(FADER, "600", "Unable to set path", id="fader-write"),
+    ],
+)
+async def test_motu_controller_logs_unknown_paths(
+    controller, panel, store, caplog, hwcid, value, warning
+):
     """A mapped path the MOTU doesn't have is logged and nothing is written."""
     del store.data[SEND]
-    await controller.process_hwc(DOWN, "Down")
-    await controller.process_hwc(str(FADER), "600")
-    assert "Unable to read path" in caplog.text
-    assert "Unable to set path" in caplog.text
+    await controller.process_hwc(str(hwcid), value)
+    assert warning in caplog.text
     assert SEND not in store.data
     assert panel.sent == []
 
@@ -393,7 +407,7 @@ async def test_motu_controller_logs_unknown_paths(controller, panel, store, capl
         param(False, {MUTE: 1.0}, {}, id="post-fader-muted"),
     ],
 )
-async def test_panel_controller_meters(store, panel, pre_fader, initial, meter):
+async def test_panel_controller_meters(store, panel, http, pre_fader, initial, meter):
     """One meters update at 0 dB on channel 0. A post-fader meter is scaled by
     the fader gain and drops to silence when muted."""
     store.data.update(initial)
@@ -410,10 +424,11 @@ async def test_panel_controller_meters(store, panel, pre_fader, initial, meter):
                     "audio_meter": {"mono": True},
                 }
             }
-        }
+        },
+        panel=panel,
+        datastore=store,
+        http=http,
     )
-    feedback.set_panel(panel)
-    feedback.set_datastore(store)
     # A full-scale sample on channel 0 is 0 dB.
     await feedback.on_change(
         {"mix/level/0": [motu.METER_SCALE], "mix/level/peaks": [motu.METER_SCALE]},

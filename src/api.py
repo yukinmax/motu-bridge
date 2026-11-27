@@ -85,20 +85,17 @@ feedback_map = binding.FeedbackMap.from_raw(mappings.feedback_map)
 motu_controller = binding.MotuController(control_map, mixer_service)
 panel_controller = binding.PanelController(
     feedback_map,
+    panel=skaarhoj_panel,
+    datastore=motu_ds,
+    meters=motu_ms,
     fader_taper=binding.FADER_TAPER,
     meter_taper=binding.METER_TAPER,
 )
 
-skaarhoj_panel.set_change_controller(motu_controller)
-
-panel_controller.set_panel(skaarhoj_panel)
-panel_controller.set_datastore(motu_ds)
-panel_controller.set_meters(motu_ms)
-skaarhoj_panel.set_feedback_controller(panel_controller)
-
-
-motu_ds.set_change_controller(panel_controller)
-motu_ms.set_change_controller(panel_controller)
+skaarhoj_panel.set_change_handler(motu_controller)
+skaarhoj_panel.set_feedback_handler(panel_controller)
+motu_ds.set_change_handler(panel_controller)
+motu_ms.set_change_handler(panel_controller)
 
 app.asgi_app = MetricsMiddleware(app.asgi_app)
 app.add_url_rule("/metrics", "metrics", metrics, methods=["GET"])

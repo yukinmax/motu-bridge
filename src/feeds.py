@@ -2,7 +2,7 @@
 controllers that connect them.
 
 The MOTU endpoints (motu._Endpoint) and the panel (raw_panel.RawPanel) are
-each given a handler with set_change_controller() and call handler.on_change()
+each given a handler with set_change_handler() and call handler.on_change()
 for each change, naming the feed it came from.
 """
 
@@ -24,7 +24,7 @@ class ChangeHandler(Protocol):
     ) -> None:
         """Handle data changed on feed.
 
-        origin names what caused a datastore change, such as the hwcid of the
-        panel control that wrote it, so feedback can skip that control.
+        origin optionally identifies what triggered the change, so receivers
+        can avoid echoing a write back to its originator.
         """
         ...
