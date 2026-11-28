@@ -89,13 +89,16 @@ def db_to_gain(db: int | float) -> float:
 
 
 def _number(value: object) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int | float)
-        or not math.isfinite(value)
-    ):
+    """value as a finite float; an int too large for a float is not one."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise InvalidValue("'value' must be a finite number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        raise InvalidValue("'value' must be a finite number") from None
+    if not math.isfinite(number):
+        raise InvalidValue("'value' must be a finite number")
+    return number
 
 
 @dataclass(frozen=True, slots=True)
