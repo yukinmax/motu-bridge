@@ -102,6 +102,7 @@ INVALID_NUMBERS = {
     "list": [1],
     "inf": math.inf,
     "nan": math.nan,
+    "huge-int": 10**400,
 }
 
 
@@ -249,6 +250,7 @@ def test_codec_encode(codec, value, scale, stored):
         param(EQ_GAIN, 20.5, None, "between -20 and 20", id="number-range"),
         param(EQ_GAIN, True, None, "finite number", id="number-bool"),
         param(EQ_GAIN, None, None, "finite number", id="number-null"),
+        param(EQ_GAIN, 10**400, None, "finite number", id="number-huge-int"),
         param(SEND, None, "linear", "finite number", id="level-null"),
     ],
 )
